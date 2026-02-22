@@ -1,0 +1,32 @@
+[project]
+name = "rag-api"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.18.4",
+    "asyncpg>=0.31.0",
+    "bcrypt>=5.0.0",
+    "email-validator>=2.3.0",
+    "fastapi>=0.129.2",
+    "google-genai>=1.64.0",
+    "httpx[brotli,http2]>=0.28.1",
+    "openai>=2.21.0",
+    "passlib>=1.7.4",
+    "pinecone>=8.1.0",
+    "prometheus-client>=0.24.1",
+    "pwdlib[argon2]>=0.3.0",
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.13.1",
+    "pyjwt>=2.11.0",
+    "pypdf>=6.7.1",
+    "python-jose[cryptography]>=3.5.0",
+    "python-multipart>=0.0.22",
+    "redis>=7.2.0",
+    "reportlab>=4.4.10",
+    "slowapi>=0.1.9",
+    "sqlalchemy>=2.0.46",
+    "user-agents>=2.2.0",
+    "uvicorn>=0.41.0",
+]

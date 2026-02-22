@@ -1,0 +1,49 @@
+services:
+  api:
+    container_name: api
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://coragem:password@postgres:5432/coragem_rag
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - ./api:/app/api
+    restart: unless-stopped
+
+  postgres:
+    container_name: postgres
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: coragem
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: coragem_rag
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coragem -d coragem_rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    container_name: redis
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
