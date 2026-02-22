@@ -1,0 +1,46 @@
+# coragem Safety Protocols 2024
+
+## Personal Protective Equipment (PPE)
+
+### Mandatory PPE
+- Hard hats (all factory areas)
+- Safety shoes (steel toe cap)
+- High-visibility vests
+- Safety glasses (production zones)
+- Hearing protection (>85dB areas)
+
+## Emergency Procedures
+
+### Fire Emergency
+1. Activate nearest fire alarm
+2. Evacuate via marked exits
+3. Assemble at designated muster point
+4. Report to Floor Warden
+5. DO NOT re-enter until all-clear
+
+### Medical Emergency
+1. Call ext. 911 or local emergency
+2. Notify supervisor immediately
+3. First aid station: Building A, Ground Floor
+4. Trained first aiders on every shift
+
+### Chemical Spill
+1. Evacuate immediate area
+2. Alert safety team: ext. 4000
+3. Contain if safe to do so
+4. Follow SDS (Safety Data Sheet) procedures
+
+## Equipment Safety
+- Lockout/Tagout (LOTO) required for maintenance
+- Pre-operation inspection checklist mandatory
+- Report defects immediately to supervisor
+- Never bypass safety guards
+
+## Incident Reporting
+- All incidents must be reported within 24 hours
+- Use Safety Portal: safety.coragem.com
+- Near-misses also require reporting
+
+## Contact
+Safety Officer: safety@coragem.com | Ext: 4000
+Emergency: Ext. 911

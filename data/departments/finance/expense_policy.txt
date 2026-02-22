@@ -1,0 +1,34 @@
+# coragem Expense Reimbursement Policy
+
+## Eligible Expenses
+
+### Travel
+- **Domestic flights:** Economy class only
+- **International flights:** Business class for flights >6 hours
+- **Hotels:** Up to ₦30,000/night (Nigeria), $150/night (international)
+- **Ground transport:** Taxis, ride-sharing, mileage (₦100/km)
+
+### Meals & Entertainment
+- **Per diem (Nigeria):** ₦8,000/day
+- **Per diem (International):** $80/day
+- **Client entertainment:** Up to ₦50,000 per event (requires justification)
+
+### Office Expenses
+- **Supplies:** Standard office materials
+- **Equipment:** Requires manager pre-approval for items >₦20,000
+- **Mobile/Internet:** ₦5,000/month allowance
+
+## Submission Process
+1. Submit via Finance Portal within 30 days
+2. Attach all receipts (required for >₦5,000)
+3. Manager approval required
+4. Reimbursement within 14 working days
+
+## Non-Reimbursable
+- Personal purchases
+- Alcohol (except approved client entertainment)
+- Traffic fines
+- Lost items
+
+## Contact
+Finance Team: finance@coragem.com | Ext: 3100

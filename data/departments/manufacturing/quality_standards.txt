@@ -1,0 +1,55 @@
+# coragem Quality Standards - Manufacturing
+
+## Raw Material Specifications
+
+### Milk Powder
+- **Protein content:** Min 24%
+- **Fat content:** 26-28%
+- **Moisture:** Max 5%
+- **Supplier certification:** ISO 22000, HACCP
+
+### Sugar
+- **Purity:** Min 99.8%
+- **Moisture:** Max 0.1%
+- **Particle size:** 0.3-0.6mm
+
+## Production Standards
+
+### Hygiene Requirements
+- Daily sanitization of all equipment
+- Personnel hygiene checks at entry
+- Air quality monitoring (particulate count)
+- Water quality testing (daily)
+
+### Process Parameters
+- **Mixing temperature:** 45-50°C
+- **Drying temperature:** 180-200°C
+- **Packing temperature:** <35°C
+- **Line speed:** 120 units/minute
+
+## Quality Control Testing
+
+### In-Process Testing
+- Moisture content (every 2 hours)
+- Bulk density (every batch)
+- Particle size distribution (every 4 hours)
+
+### Final Product Testing
+- Microbiological analysis (every batch)
+- Chemical composition (daily)
+- Sensory evaluation (daily)
+- Package integrity (random sampling)
+
+## Rejection Criteria
+- Microbial count exceeds limit
+- Composition out of specification
+- Foreign matter detected
+- Package defects (leaks, damage)
+
+## Documentation
+- Batch records (retained 2 years)
+- Test results (retained 2 years)
+- Deviation reports (retained 5 years)
+
+## Contact
+Quality Manager: quality@coragem.com | Ext: 5200

@@ -1,0 +1,35 @@
+# coragem Product Catalog 2024
+
+## Dairy Products
+
+### Cowbell Milk Powder
+- **Product Code:** CB-001
+- **Pack Sizes:** 400g, 900g, 1.8kg
+- **Price (Nigeria):** ₦2,500 (400g), ₦5,200 (900g), ₦9,800 (1.8kg)
+- **Shelf Life:** 24 months
+- **Target Market:** Families, bulk consumers
+
+### Loya Milk
+- **Product Code:** LY-002  
+- **Pack Sizes:** 400g, 900g
+- **Price (Nigeria):** ₦2,200 (400g), ₦4,800 (900g)
+- **Shelf Life:** 24 months
+- **Target Market:** Budget-conscious families
+
+## Beverages
+
+### Miksi Chocolate Drink
+- **Product Code:** MK-003
+- **Pack Sizes:** 400g tin
+- **Price (Nigeria):** ₦3,500
+- **Shelf Life:** 18 months
+- **Target Market:** Children, teenagers
+
+## Distribution Channels
+- Direct retail (supermarkets, grocery stores)
+- Wholesale distributors (18 countries)
+- Online platforms (selected markets)
+
+## Q4 2024 Promotions
+- Cowbell: Buy 2 get 10% off (Oct-Dec)
+- Miksi: Back-to-school promo (Sept-Nov)
