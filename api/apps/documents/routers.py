@@ -2,14 +2,23 @@
 Documents router.
 
 Handles document ingestion. No logic here — calls services.
+PDF ingestion is dispatched as a Celery background task.
 """
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
+from celery.result import AsyncResult
 
 from api.apps.auth.services import verify_user
-from api.apps.documents.schemas import DocumentCreate, DocumentResponse
+from api.apps.documents.schemas import (
+    DocumentCreate,
+    DocumentResponse,
+    IngestAcceptedResponse,
+    TaskStatusResponse,
+)
 from api.apps.documents.services import ingest_document
+from api.apps.documents.tasks import ingest_document_task
+from api.core.celery_app import celery_app
 from api.core.dependencies import get_vector_store
 from api.core.vector_store import VectorStore
 from api.db.session import get_session
@@ -31,7 +40,7 @@ async def ingest(
     vector_store: VectorStore = Depends(get_vector_store),
 ):
     """
-    Ingest a document (with chunking + embedding) into the RAG system.
+    Ingest a raw text document (synchronous — for small payloads).
 
     Security:
     - User can only upload to their own department.
@@ -50,7 +59,7 @@ async def ingest(
     )
 
 
-@router.post("/ingest/pdf", status_code=201)
+@router.post("/ingest/pdf", status_code=202, response_model=IngestAcceptedResponse)
 async def ingest_pdf(
     title: str = Form(..., max_length=500, description="Title of the document"),
     department: str = Form(..., max_length=100, description="Target department"),
@@ -58,41 +67,69 @@ async def ingest_pdf(
     source_url: str = Form(None, description="Optional source URL"),
     file: UploadFile = File(..., description="PDF file to parse and ingest"),
     user: dict = Depends(verify_user),
-    session: AsyncSession = Depends(get_session),
-    vector_store: VectorStore = Depends(get_vector_store),
 ):
     """
-    Ingest a PDF document directly.
-    Extracts text from the PDF and runs the standard chunking + embedding process.
+    Ingest a PDF document as a background task.
+
+    1. Extract text from the PDF immediately (fast)
+    2. Dispatch chunking + embedding + Pinecone upsert to Celery worker
+    3. Return 202 Accepted with a task_id for status polling
+
+    Poll `GET /api/v1/documents/tasks/{task_id}` to check progress.
     """
-    if not file.filename.endswith(".pdf"):
+    # Guard: file type
+    if not file.filename or not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported by this endpoint.")
-    
-    # Extract text from the uploaded PDF
+
+    # Extract text synchronously (fast, CPU-bound, no network)
     extracted_text = extract_text_from_pdf(file.file)
-    
+
     if not extracted_text:
         raise HTTPException(status_code=400, detail="No readable text found in the PDF.")
-        
-    # Construct DocumentCreate model
-    data = DocumentCreate(
+
+    # Dispatch to Celery worker
+    task = ingest_document_task.delay(
         title=title,
         department=department,
         doc_type=doc_type,
-        source_url=source_url,
-        content=extracted_text
-    )
-    
-    result = await ingest_document(
-        session=session,
-        vector_store=vector_store,
-        data=data,
+        content=extracted_text,
         user_department=user["department"],
-    )
-    
-    return success_response(
-        status_code=201,
-        message="PDF ingested and processed successfully",
-        data=result.model_dump(),
+        source_url=source_url,
     )
 
+    logger.info(f"PDF ingestion dispatched: task_id={task.id}, title='{title}'")
+
+    return IngestAcceptedResponse(
+        task_id=task.id,
+        message=f"PDF '{title}' accepted for processing. Poll /tasks/{task.id} for status.",
+    )
+
+
+@router.get("/tasks/{task_id}", response_model=TaskStatusResponse)
+async def get_task_status(
+    task_id: str,
+    user: dict = Depends(verify_user),
+):
+    """
+    Poll Celery task status.
+
+    Returns:
+    - PENDING: Task is waiting in the queue
+    - STARTED: Worker picked it up
+    - SUCCESS: Done — result contains document metadata
+    - FAILURE: Failed — error contains the exception message
+    - RETRY: Task is retrying after a transient failure
+    """
+    result = AsyncResult(task_id, app=celery_app)
+
+    response = TaskStatusResponse(
+        task_id=task_id,
+        status=result.status,
+    )
+
+    if result.successful():
+        response.result = result.result
+    elif result.failed():
+        response.error = str(result.result)
+
+    return response
