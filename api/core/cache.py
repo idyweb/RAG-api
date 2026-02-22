@@ -29,7 +29,13 @@ class CacheManager:
         Args:
             url: Redis connection URL (e.g. redis://localhost:6379)
         """
-        self.redis = redis.from_url(url, decode_responses=True)
+        self.redis = redis.from_url(url,
+        decode_responses=True,
+        max_connections=50,
+        socket_keepalive=True,
+        socket_timeout=5.0,
+        retry_on_timeout=True)
+        
         logger.info(f"Initialized CacheManager: {url}")
     
     def get_key(self, query: str, department: str) -> str:
