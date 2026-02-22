@@ -2,6 +2,7 @@
 LLM generation service.
 
 Uses Google Gemini for answer generation.
+Streaming-only architecture — all responses are yielded as async generators.
 """
 
 from typing import List, Dict, AsyncGenerator, Optional
@@ -16,114 +17,87 @@ logger = get_logger(__name__)
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
 
-async def generate_answer(
-    query: str, 
-    docs: List[Dict], 
-    department: str, 
-    language: str = "en",
-    chat_history: Optional[List[Dict[str, str]]] = None
-) -> str:
-    """
-    Generate answer using retrieved documents as context.
-    
-    Args:
-        query: User's question
-        docs: List of retrieved documents with 'content' and 'metadata'
-        department: User's department for enhanced prompt context
-        language: User's intended language for response
-        chat_history: Previous conversational messages
+# ── Private Helpers ───────────────────────────────────────────────────────────
 
-        
-    Returns:
-        Generated answer
-        
-    Note: Prompt engineering is critical here to prevent hallucinations.
+
+def _build_context(docs: List[Dict]) -> str:
     """
-    if not docs:
-        return "I don't have enough information to answer this question."
-    
-    # Build context from retrieved documents
+    Build context string from retrieved documents.
+
+    Why extracted: Used by both streaming answer gen and any future
+    non-streaming fallback. Single source of truth for prompt formatting.
+    """
     context_parts = []
     for i, doc in enumerate(docs, 1):
-        context_parts.append(
-            f"[Document {i} - {doc['metadata']['title']}]\n{doc['content']}"
-        )
-    
-    context = "\n\n".join(context_parts)
-    
-    # Prompt engineering for accuracy
-    system_prompt = _build_system_prompt(department, language)
+        title = doc["metadata"]["title"]
+        content = doc["content"]
+        context_parts.append(f"[Document {i} - {title}]\n{content}")
+    return "\n\n".join(context_parts)
 
-    user_prompt = f"""Context documents:
 
-{context}
+def _build_chat_contents(
+    user_prompt: str,
+    chat_history: Optional[List[Dict[str, str]]] = None
+) -> List[types.Content]:
+    """
+    Build Gemini contents list with chat history.
 
-Question: {query}
+    Maps our internal 'assistant' role → Gemini's 'model' role.
+    Appends the current user prompt at the end.
+    """
+    contents: List[types.Content] = []
 
-Answer (based only on the context above):"""
-
-    # Build history contents list for Gemini
-    contents = []
     if chat_history:
         for msg in chat_history:
-            # map 'user'/'assistant' to Gemini's 'user'/'model'
             role = "model" if msg["role"] == "assistant" else "user"
             contents.append(
-                types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])])
+                types.Content(
+                    role=role,
+                    parts=[types.Part.from_text(text=msg["content"])]
+                )
             )
-            
-    # Append the current query
-    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_prompt)]))
-    
-    try:
-        response = await client.aio.models.generate_content(
-            model=settings.GEMINI_MODEL,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.1,  # Low temperature for consistency
-                max_output_tokens=500
-            )
+
+    # Current query always goes last
+    contents.append(
+        types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=user_prompt)]
         )
-        
-        answer = response.text.strip()
-        
-        logger.info(
-            f"Generated answer: {len(answer)} chars, model={settings.GEMINI_MODEL}"
-        )
-        
-        return answer
-        
-    except Exception as e:
-        logger.error(f"LLM generation failed: {e}")
-        return "I encountered an error generating the answer. Please try again."
+    )
+    return contents
+
+
+# ── Public API (Streaming Only) ──────────────────────────────────────────────
 
 
 async def generate_answer_stream(
-    query: str, 
-    docs: List[Dict], 
-    department: str, 
+    query: str,
+    docs: List[Dict],
+    department: str,
     language: str = "en",
     chat_history: Optional[List[Dict[str, str]]] = None
 ) -> AsyncGenerator[str, None]:
     """
-    Generate streaming answer using retrieved documents as context.
-    Yields chunks of text as they arrive from the LLM.
+    Stream answer tokens using retrieved documents as context.
+
+    This is the ONLY generation path. The standard /query endpoint
+    collects these chunks into a full string before returning JSON.
+
+    Args:
+        query: User's question
+        docs: Retrieved documents with 'content' and 'metadata'
+        department: User's department for prompt context
+        language: Response language code
+        chat_history: Previous conversational messages
+
+    Yields:
+        Text chunks as they arrive from the LLM
     """
     if not docs:
         yield "I don't have enough information to answer this question."
         return
-        
-    # Build context from retrieved documents
-    context_parts = []
-    for i, doc in enumerate(docs, 1):
-        context_parts.append(
-            f"[Document {i} - {doc['metadata']['title']}]\n{doc['content']}"
-        )
-    
-    context = "\n\n".join(context_parts)
-    
-    # Prompt engineering for accuracy
+
+    context = _build_context(docs)
     system_prompt = _build_system_prompt(department, language)
 
     user_prompt = f"""Context documents:
@@ -134,18 +108,8 @@ Question: {query}
 
 Answer (based only on the context above):"""
 
-    # Build history contents list for Gemini
-    contents = []
-    if chat_history:
-        for msg in chat_history:
-            role = "model" if msg["role"] == "assistant" else "user"
-            contents.append(
-                types.Content(role=role, parts=[types.Part.from_text(text=msg["content"])])
-            )
-            
-    # Append the current query
-    contents.append(types.Content(role="user", parts=[types.Part.from_text(text=user_prompt)]))
-    
+    contents = _build_chat_contents(user_prompt, chat_history)
+
     try:
         response_stream = await client.aio.models.generate_content_stream(
             model=settings.GEMINI_MODEL,
@@ -153,27 +117,31 @@ Answer (based only on the context above):"""
             config=types.GenerateContentConfig(
                 system_instruction=system_prompt,
                 temperature=0.1,
-                max_output_tokens=500
+                max_output_tokens=500,
             )
         )
-        
+
         async for chunk in response_stream:
             if chunk.text:
                 yield chunk.text
-                
+
     except Exception as e:
         logger.error(f"LLM streaming generation failed: {e}")
         yield "I encountered an error generating the answer."
 
+
+# ── Prompt Engineering ────────────────────────────────────────────────────────
+
+
 def _build_system_prompt(department: str, language: str = "en") -> str:
     """
     Build department-specific system prompt.
-    
+
     Args:
         department: User's department (for context)
         language: Response language (for multinational support)
     """
-    
+
     base_prompt = f"""You are an AI assistant for {settings.COMPANY_NAME} employees.
 
 ## Your Role
@@ -233,7 +201,7 @@ Bad Response:
     # Add language-specific instructions
     if language != "en":
         base_prompt += f"\n\n**Language Note:** Respond in {_get_language_name(language)} while maintaining accuracy."
-    
+
     return base_prompt
 
 
