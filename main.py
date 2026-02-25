@@ -27,8 +27,10 @@ from api.utils.logger import get_logger
 from api.apps.auth.routers import router as auth_router
 from api.apps.documents.routers import router as documents_router
 from api.apps.rag.routers import router as rag_router
+from api.apps.agents.mcp_server import mcp
 from api.db.session import get_session
 from api.core.dependencies import get_cache
+from fastmcp.utilities.lifespan import combine_lifespans
 
 logger = get_logger(__name__)
 
@@ -43,6 +45,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Shutdown complete")
 
 
+# ── MCP ────────────────────────────────────────────────────────────────────
+mcp_app = mcp.http_app(path="/")
+
+
 # ── App ───────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
@@ -51,7 +57,7 @@ app = FastAPI(
     description="Multi-Department RAG System with Role-Based Access Control",
     docs_url="/docs",
     redoc_url="/redoc",
-    lifespan=lifespan,
+    lifespan=combine_lifespans(lifespan, mcp_app.lifespan),
 )
 
 
@@ -79,6 +85,9 @@ app.add_exception_handler(Exception, general_exception_handler)
 app.include_router(auth_router)
 app.include_router(documents_router)
 app.include_router(rag_router)
+
+# ── MCP Mount ─────────────────────────────────────────────────────────────────
+app.mount("/mcp", mcp_app)
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
