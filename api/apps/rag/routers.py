@@ -12,7 +12,7 @@ from api.apps.rag.schemas import QueryRequest, QueryResponse
 from api.apps.rag.services import rag_query, rag_query_stream
 from api.apps.auth.services import verify_user
 from api.db.session import get_session
-from api.core.dependencies import get_vector_store, get_cache
+from api.core.dependencies import get_vector_store, get_cache, get_semantic_router
 from api.utils.logger import get_logger
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -31,7 +31,8 @@ async def query_endpoint(
     user: dict = Depends(verify_user),
     session: AsyncSession = Depends(get_session),
     vector_store = Depends(get_vector_store),
-    cache = Depends(get_cache)
+    cache = Depends(get_cache),
+    semantic_router = Depends(get_semantic_router)
 ) -> QueryResponse:
     """
     Query documents with department-based filtering.
@@ -61,6 +62,7 @@ async def query_endpoint(
             session=session,
             vector_store=vector_store,
             cache=cache,
+            semantic_router=semantic_router,
             request=payload,
             user_department=user["department"],
             user_id=user["id"]
@@ -81,7 +83,8 @@ async def query_stream_endpoint(
     user: dict = Depends(verify_user),
     session: AsyncSession = Depends(get_session),
     vector_store = Depends(get_vector_store),
-    cache = Depends(get_cache)
+    cache = Depends(get_cache),
+    semantic_router = Depends(get_semantic_router)
 ) -> StreamingResponse:
     """
     Stream documents and answers with Chat History support (Server-Sent Events).
@@ -96,6 +99,7 @@ async def query_stream_endpoint(
             session=session,
             vector_store=vector_store,
             cache=cache,
+            semantic_router=semantic_router,
             request=payload,
             user_department=user["department"],
             user_id=user["id"]

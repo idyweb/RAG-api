@@ -15,8 +15,10 @@ from api.apps.rag.models import QueryLog
 from api.core.vector_store import VectorStore
 from api.core.cache import CacheManager
 from api.core.llm import generate_answer_stream
+from api.core.semantic_router import SemanticRouter, RoutedAgent
 from api.utils.logger import get_logger
 from api.utils.metrics import query_count, query_latency
+from api.utils.pipeline_timer import PipelineTimer
 
 logger = get_logger(__name__)
 
@@ -28,6 +30,7 @@ async def rag_query(
     session: AsyncSession,
     vector_store: VectorStore,
     cache: CacheManager,
+    semantic_router: SemanticRouter,
     request: QueryRequest,
     user_department: str,
     user_id: str
@@ -46,6 +49,7 @@ async def rag_query(
     5. Cache result (dept-specific)
     6. Return response
     """
+    timer = PipelineTimer(department=user_department)
     start_time = time.time()
 
     logger.info(
@@ -60,9 +64,40 @@ async def rag_query(
         chat_history = await cache.get_chat_history(request.session_id)
         await cache.append_chat_message(request.session_id, ChatRole.USER, request.query)
 
-    # 1. Check cache (dept-specific key)
+    # 1. Semantic Routing (Intent Classification)
+    with timer.stage("intent_classification"):
+        decision = await semantic_router.route_query(request.query, user_department)
+        
+    if decision.routed_to != RoutedAgent.RAG:
+        latency_ms = (time.time() - start_time) * 1000
+        msg = (
+            f"This query requires the '{decision.routed_to.value}' agent "
+            f"(Confidence: {decision.confidence_score:.2f}). "
+            f"This specialized Copilot integration is coming soon."
+        )
+        response = QueryResponse(
+            answer=msg,
+            sources=[],
+            confidence="high",
+            latency_ms=latency_ms,
+            cached=False
+        )
+        if request.session_id:
+            await cache.append_chat_message(request.session_id, ChatRole.ASSISTANT, msg)
+            
+        await _log_query(
+            session, request.query, user_id, user_department,
+            0, latency_ms, False, "high",
+            stage_timings=timer.as_dict(),
+            routed_to=decision.routed_to.value
+        )
+        return response
+
+    # 2. Check cache (dept-specific key)
     cache_key = cache.get_key(request.query, user_department)
-    if cached_result := await cache.get(cache_key):
+    with timer.stage("cache_check"):
+        cached_result = await cache.get(cache_key)
+    if cached_result:
         latency_ms = (time.time() - start_time) * 1000
         logger.info(f"Cache HIT: {latency_ms:.2f}ms")
         return QueryResponse(
@@ -72,15 +107,16 @@ async def rag_query(
         )
 
     # 2. Retrieve documents with department filter
-    docs = await vector_store.search(
-        query=request.query,
-        filter={
-            "department": user_department,
-            "is_active": True
-        },
-        limit=request.max_results,
-        score_threshold=request.confidence_threshold
-    )
+    with timer.stage("retrieval"):
+        docs = await vector_store.search(
+            query=request.query,
+            filter={
+                "department": user_department,
+                "is_active": True
+            },
+            limit=request.max_results,
+            score_threshold=request.confidence_threshold
+        )
 
     # 3. No high-confidence results → bail early
     if not docs:
@@ -110,13 +146,14 @@ async def rag_query(
 
     # 4. Collect streamed answer into a single string
     answer_parts: List[str] = []
-    async for chunk in generate_answer_stream(
-        query=request.query,
-        docs=docs,
-        department=user_department,
-        chat_history=chat_history
-    ):
-        answer_parts.append(chunk)
+    with timer.stage("generation"):
+        async for chunk in generate_answer_stream(
+            query=request.query,
+            docs=docs,
+            department=user_department,
+            chat_history=chat_history
+        ):
+            answer_parts.append(chunk)
 
     answer = "".join(answer_parts)
 
@@ -149,7 +186,12 @@ async def rag_query(
 
     # 6. Cache + Log + Metrics
     await _cache_response(cache, cache_key, response, ttl=3600)
-    await _log_query(session, request.query, user_id, user_department, len(docs), latency_ms, False, "high")
+    await _log_query(
+        session, request.query, user_id, user_department,
+        len(docs), latency_ms, False, "high",
+        stage_timings=timer.as_dict(),
+        routed_to=RoutedAgent.RAG.value
+    )
     query_count.labels(department=user_department, confidence="high").inc()
     query_latency.labels(department=user_department, cached="false").observe(latency_ms / 1000.0)
 
@@ -168,6 +210,7 @@ async def rag_query_stream(
     session: AsyncSession,
     vector_store: VectorStore,
     cache: CacheManager,
+    semantic_router: SemanticRouter,
     request: QueryRequest,
     user_department: str,
     user_id: str
@@ -175,6 +218,7 @@ async def rag_query_stream(
     """
     Execute RAG query with streaming SSE output and conversational memory.
     """
+    timer = PipelineTimer(department=user_department)
     start_time = time.time()
 
     logger.info(
@@ -189,13 +233,40 @@ async def rag_query_stream(
         chat_history = await cache.get_chat_history(request.session_id)
         await cache.append_chat_message(request.session_id, ChatRole.USER, request.query)
 
+    # Semantic Routing (Intent Classification)
+    with timer.stage("intent_classification"):
+        decision = await semantic_router.route_query(request.query, user_department)
+        
+    if decision.routed_to != RoutedAgent.RAG:
+        latency_ms = (time.time() - start_time) * 1000
+        msg = (
+            f"This query requires the '{decision.routed_to.value}' agent "
+            f"(Confidence: {decision.confidence_score:.2f}). "
+            f"This specialized Copilot integration is coming soon."
+        )
+        yield f"event: sources\ndata: []\n\n"
+        yield f"event: message\ndata: {json.dumps({'content': msg})}\n\n"
+        
+        if request.session_id:
+            await cache.append_chat_message(request.session_id, ChatRole.ASSISTANT, msg)
+            
+        await _log_query(
+            session, request.query, user_id, user_department,
+            0, latency_ms, False, "high",
+            stage_timings=timer.as_dict(),
+            routed_to=decision.routed_to.value
+        )
+        yield "event: end\ndata: {}\n\n"
+        return
+
     # Retrieve documents
-    docs = await vector_store.search(
-        query=request.query,
-        filter={"department": user_department, "is_active": True},
-        limit=request.max_results,
-        score_threshold=request.confidence_threshold
-    )
+    with timer.stage("retrieval"):
+        docs = await vector_store.search(
+            query=request.query,
+            filter={"department": user_department, "is_active": True},
+            limit=request.max_results,
+            score_threshold=request.confidence_threshold
+        )
 
     # Build Sources payload first to stream it immediately
     sources = [
@@ -244,7 +315,12 @@ async def rag_query_stream(
         if request.session_id and full_answer:
             await cache.append_chat_message(request.session_id, ChatRole.ASSISTANT, full_answer)
 
-        await _log_query(session, request.query, user_id, user_department, len(docs), latency_ms, False, "high")
+        await _log_query(
+            session, request.query, user_id, user_department,
+            len(docs), latency_ms, False, "high",
+            stage_timings=timer.as_dict(),
+            routed_to=RoutedAgent.RAG.value
+        )
         query_count.labels(department=user_department, confidence="high").inc()
         query_latency.labels(department=user_department, cached="false").observe(latency_ms / 1000.0)
 
@@ -277,9 +353,11 @@ async def _log_query(
     result_count: int,
     latency_ms: float,
     cached: bool,
-    confidence: str
+    confidence: str,
+    stage_timings: dict | None = None,
+    routed_to: str = "rag"
 ) -> None:
-    """Log a RAG query to DB for analytics."""
+    """Log a RAG query to DB for analytics, including per-stage timings."""
     logger.debug(f"Logging query to DB stats: '{query[:30]}...' from {department}")
     try:
         log_entry = QueryLog(
@@ -289,7 +367,9 @@ async def _log_query(
             result_count=result_count,
             latency_ms=latency_ms,
             cached=cached,
-            confidence=confidence
+            confidence=confidence,
+            stage_timings=stage_timings,
+            routed_to=routed_to
         )
         session.add(log_entry)
         await session.commit()
