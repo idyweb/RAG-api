@@ -12,6 +12,7 @@ from api.db.base_model import Base
 # Import all models so Alembic can discover them
 import api.apps.auth.models
 import api.apps.documents.models
+import api.apps.agents.models
 import api.apps.health.models
 import api.apps.rag.models
 

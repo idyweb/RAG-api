@@ -6,7 +6,7 @@ User accounts with department-based access control.
 
 import uuid
 from typing import Optional
-from sqlalchemy import String, Boolean, Enum as SAEnum
+from sqlalchemy import String, Boolean, Enum as SAEnum, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from api.db.base_model import BaseModel
@@ -39,3 +39,18 @@ class User(BaseModel):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class ChannelIdentity(BaseModel):
+    """
+    Channel identity.
+
+    Maps external Teams/M365 identities to the system.
+    """
+    __tablename__ = "channel_identities"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True, nullable=False)
+    channel: Mapped[str] = mapped_column(String(50), nullable=False)
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
