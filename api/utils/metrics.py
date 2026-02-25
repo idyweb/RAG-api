@@ -38,3 +38,14 @@ ingestion_latency = Histogram(
     ["department"],
     buckets=[1.0, 5.0, 10.0, 30.0, 60.0, 120.0]
 )
+
+
+# ── Pipeline Stage Metrics ────────────────────────────────────────────────────
+
+pipeline_stage_latency = Histogram(
+    "rag_pipeline_stage_seconds",
+    "Per-stage latency within the RAG pipeline",
+    ["stage", "department"],
+    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0]
+)
+
