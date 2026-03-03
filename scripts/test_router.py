@@ -13,11 +13,12 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from api.core.semantic_router import SemanticRouter, RoutedAgent
+from api.core.dependencies import get_semantic_router
 
 class TestCase(TypedDict):
     query: str
     department: str
-    expected: RoutedAgent
+    expected: str
 
 GOLDEN_DATASET: list[TestCase] = [
     {
@@ -59,7 +60,7 @@ GOLDEN_DATASET: list[TestCase] = [
 
 async def run_tests():
     print("Initializing Semantic Router...")
-    router = SemanticRouter()
+    router = get_semantic_router()
     
     success_count = 0
     total = len(GOLDEN_DATASET)
@@ -70,10 +71,10 @@ async def run_tests():
         decision = await router.route_query(test['query'], test['department'])
         
         if decision.routed_to == test['expected']:
-            print(f"✅ PASS: Routed to {decision.routed_to.value} (Conf: {decision.confidence_score:.2f})")
+            print(f"✅ PASS: Routed to {decision.routed_to} (Conf: {decision.confidence_score:.2f})")
             success_count += 1
         else:
-            print(f"❌ FAIL: Expected {test['expected'].value}, got {decision.routed_to.value}")
+            print(f"❌ FAIL: Expected {test['expected']}, got {decision.routed_to}")
             print(f"Reasoning provided: {decision.reasoning}")
         print("-" * 50)
         

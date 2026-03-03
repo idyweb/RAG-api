@@ -1,13 +1,16 @@
 """
 Semantic Router for multi-agent intent classification.
 
+Microkernel architecture: agents register themselves via `register_agent()`,
+removing hardcoded Enums. New capabilities (Power BI, ERP, etc.) are added
+by registering a new agent — zero changes to the core routing logic.
+
 Uses a fast LLM call (Gemini) with structured JSON output to classify
-the user's intent into one of the designated Copilots/Agents.
+the user's intent into one of the dynamically registered agents.
 """
 
 import json
-from enum import Enum
-from typing import Dict, Any, Optional
+from typing import Dict, Optional, Protocol, runtime_checkable
 
 from google import genai
 from google.genai import types
@@ -19,8 +22,51 @@ from api.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-class RoutedAgent(str, Enum):
-    """Available target agents for routing."""
+# ── Agent Plugin Interface ────────────────────────────────────────────────────
+
+
+@runtime_checkable
+class BaseAgent(Protocol):
+    """
+    Protocol that every pluggable agent must satisfy.
+
+    To add a new capability to the platform:
+    1. Create a class that fulfills this protocol.
+    2. Call `semantic_router.register_agent(your_agent)` at startup.
+    3. The router will automatically include it in LLM classification.
+    """
+
+    name: str
+    """Unique identifier used in routing decisions (e.g. 'power_bi')."""
+
+    description: str
+    """
+    Human-readable description shown to the LLM so it understands
+    when to route queries to this agent. Be specific about triggers.
+    """
+
+    async def execute(self, query: str, context: dict) -> dict:
+        """
+        Execute the agent's core capability.
+
+        Args:
+            query: The user's natural language query.
+            context: Runtime context (department, user_id, session, etc.).
+
+        Returns:
+            Agent-specific result dict.
+        """
+        ...
+
+
+# ── Backward-Compatible String Constants ──────────────────────────────────────
+# Consumers that previously imported `RoutedAgent.RAG` can now use
+# `RoutedAgent.RAG` as a plain string constant instead.
+
+
+class RoutedAgent:
+    """String constants for built-in agent names (backward compat)."""
+
     RAG = "rag"
     POWER_BI = "power_bi"
     GTM_API = "gtm_api"
@@ -30,10 +76,14 @@ class RoutedAgent(str, Enum):
     UNKNOWN = "unknown"
 
 
+# ── Router Response Schema ────────────────────────────────────────────────────
+
+
 class RouterResponse(BaseModel):
     """Structured output expected from the LLM Router."""
-    routed_to: RoutedAgent = Field(
-        description="The target agent strictly chosen to handle the query"
+
+    routed_to: str = Field(
+        description="The target agent name chosen to handle the query"
     )
     confidence_score: float = Field(
         description="Confidence score between 0.0 and 1.0 that the chosen agent is correct"
@@ -43,33 +93,64 @@ class RouterResponse(BaseModel):
     )
 
 
+# ── Semantic Router (Microkernel Core) ────────────────────────────────────────
+
+
 class SemanticRouter:
     """
-    Evaluates user intent to route the query to the correct Coragem Copilot.
+    Microkernel Semantic Router.
+
+    Agents register themselves, removing hardcoded Enums.
+    The LLM prompt is built dynamically from the registry.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        # We use a fast, cost-effective model for the high-volume routing layer
         self.model = settings.GEMINI_MODEL
+        self._registry: Dict[str, BaseAgent] = {}
+
+    def register_agent(self, agent: BaseAgent) -> None:
+        """
+        Register a new agent capability.
+
+        Why this matters: adding a new agent (e.g. Power BI connector)
+        requires zero changes to the core router logic — just register it.
+        """
+        if agent.name in self._registry:
+            logger.warning(f"Agent '{agent.name}' already registered — overwriting.")
+        self._registry[agent.name] = agent
+        logger.info(f"Registered agent: '{agent.name}'")
+
+    @property
+    def registered_agents(self) -> list[str]:
+        """Return the names of all registered agents."""
+        return list(self._registry.keys())
 
     async def route_query(
-        self, 
-        query: str, 
-        department: str, 
-        chat_history: Optional[list] = None
+        self,
+        query: str,
+        department: str,
+        chat_history: Optional[list] = None,
     ) -> RouterResponse:
         """
-        Analyze the query and determine which specialized agent should handle it.
+        Analyze the query and determine which registered agent should handle it.
+
+        The LLM prompt is built dynamically from whatever agents are
+        currently registered — no hardcoded list.
         """
+        if not self._registry:
+            logger.error("No agents registered. Cannot route.")
+            return RouterResponse(
+                routed_to=RoutedAgent.UNKNOWN,
+                confidence_score=0.0,
+                reasoning="No agents registered in the router",
+            )
+
         system_prompt = self._build_system_prompt(department)
-        
-        # Build contents structure 
-        # (For accurate routing, we just need the system prompt and the latest query.
-        # We omit chat_history to keep routing fast and highly focused on the immediate intent,
-        # unless strictly necessary. For now, we only pass the query.)
-        
-        user_prompt = f"User Request: {query}\n\nAnalyze the request and return the JSON routing decision."
+        user_prompt = (
+            f"User Request: {query}\n\n"
+            "Analyze the request and return the JSON routing decision."
+        )
 
         try:
             logger.debug(f"Routing query from {department}: '{query[:50]}...'")
@@ -78,26 +159,34 @@ class SemanticRouter:
                 contents=user_prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=system_prompt,
-                    temperature=0.0,  # Zero temperature for deterministic routing
+                    temperature=0.0,
                     response_mime_type="application/json",
                     response_schema=RouterResponse,
-                )
+                ),
             )
 
             if not response.text:
                 logger.warning("Empty response from LLM Router. Defaulting to UNKNOWN.")
                 return RouterResponse(
-                    routed_to=RoutedAgent.UNKNOWN, 
-                    confidence_score=0.0, 
-                    reasoning="Empty LLM response"
+                    routed_to=RoutedAgent.UNKNOWN,
+                    confidence_score=0.0,
+                    reasoning="Empty LLM response",
                 )
 
-            # Gemini SDK will guarantee JSON output matches Schema when response_schema is set
             decision_dict = json.loads(response.text)
             decision = RouterResponse(**decision_dict)
-            
+
+            # Post-hoc validation: if the LLM hallucinated an agent name
+            # that isn't registered, fall back to unknown.
+            if decision.routed_to not in self._registry:
+                logger.warning(
+                    f"LLM returned unregistered agent '{decision.routed_to}'. "
+                    "Falling back to 'unknown'."
+                )
+                decision.routed_to = RoutedAgent.UNKNOWN
+
             logger.info(
-                f"Router Decision: {decision.routed_to.value} "
+                f"Router Decision: {decision.routed_to} "
                 f"(conf={decision.confidence_score}): {decision.reasoning}"
             )
             return decision
@@ -105,54 +194,37 @@ class SemanticRouter:
         except json.JSONDecodeError as e:
             logger.error(f"Router failed to produce valid JSON: {e}")
             return RouterResponse(
-                routed_to=RoutedAgent.UNKNOWN, 
-                confidence_score=0.0, 
-                reasoning="JSON parse error"
+                routed_to=RoutedAgent.UNKNOWN,
+                confidence_score=0.0,
+                reasoning="JSON parse error",
             )
         except Exception as e:
             logger.error(f"Semantic Router execution failed: {e}")
             return RouterResponse(
-                routed_to=RoutedAgent.UNKNOWN, 
-                confidence_score=0.0, 
-                reasoning=str(e)
+                routed_to=RoutedAgent.UNKNOWN,
+                confidence_score=0.0,
+                reasoning=str(e),
             )
 
     def _build_system_prompt(self, department: str) -> str:
         """
-        Builds the strict classification rules for the Semantic Router.
+        Build the classification prompt dynamically from the agent registry.
+
+        Why dynamic: adding an agent automatically updates the LLM's
+        decision space — no prompt editing required.
         """
-        return f"""You are the Semantic Router for the Coragem Enterprise AI Platform.
-Your ONLY job is to classify the user's request and route it to the correct specialized agent.
-The user belongs to the '{department}' department. Use this for context, but route based on the query intent.
+        agent_lines: list[str] = []
+        for idx, (name, agent) in enumerate(self._registry.items(), start=1):
+            agent_lines.append(f"{idx}. `{name}`: {agent.description}")
 
-Available Agents:
+        agent_block = "\n\n".join(agent_lines)
 
-1. `rag`: (HR Policy Assistant, General Knowledge)
-   - Handles queries about corporate policies, HR, leave (e.g., maternity leave), IT guidelines, FAQs, facilities, general admin, complaints, and static manuals.
-   - If the user asks "What is...", "How do I...", "What is the policy for...", or expresses a general workplace concern or complaint (e.g., food, cafeteria, office), route here.
-
-2. `power_bi`: (Sales Intelligence - Analytics)
-   - Handles queries about dashboards, historical charts, revenue targets, aggregate sales figures.
-   - Example: "Show me the top selling SKUs in Angola this month compared to target."
-
-3. `gtm_api`: (Sales Intelligence - CRM/Operations)
-   - Handles route planning, sales rep performance, active pipeline status.
-   - Example: "What is John's route today?" or "Show me the pipeline for Q3."
-
-4. `erp_api`: (ERP Support Copilot)
-   - Handles live transactional data: Microsoft Dynamics Business Central, inventory limits, PO status, financial closes, stock levels.
-   - Example: "Has Purchase Order 12345 been approved?" or "How much Cowbell 400g is in the Lagos warehouse?"
-
-5. `qms`: (Production Quality Assistant)
-   - Handles IS-OEE (Overall Equipment Effectiveness) systems, Quality Management System (QMS), equipment maintenance logs, raw materials batch info, incidence reports.
-   - Example: "Show the maintenance history for packaging line 3" or "Are there any QMS incidents for batch A1?"
-
-6. `document_search`: (Intelligent Document Search)
-   - The user is explicitly asking to *find* a specific file, presentation, or email, rather than asking for the answer inside it.
-   - Example: "Find the Q3 marketing presentation that John sent last week."
-
-7. `unknown`: 
-   - The request is completely nonsensical, malicious, or clearly falls outside any corporate AI capabilities.
-
-You must reply with a valid JSON object matching the requested schema. Do not include markdown formatting or extra text outside the JSON.
-"""
+        return (
+            f"You are the Semantic Router for the Coragem Enterprise AI Platform.\n"
+            f"Your ONLY job is to classify the user's request and route it to the correct specialized agent.\n"
+            f"The user belongs to the '{department}' department. Use this for context, but route based on the query intent.\n\n"
+            f"Available Agents:\n\n"
+            f"{agent_block}\n\n"
+            f"You must reply with a valid JSON object matching the requested schema. "
+            f"Do not include markdown formatting or extra text outside the JSON."
+        )

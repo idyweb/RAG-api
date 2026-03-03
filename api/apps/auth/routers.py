@@ -8,7 +8,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.apps.auth.schemas import RegisterRequest, LoginRequest, UserResponse, LoginResponse
-from api.apps.auth.services import register_user, login_user, verify_user
+from api.apps.auth.services import register_user, login_user
+from api.core.dependencies import verify_user
 from api.db.session import get_session
 from api.utils.responses import success_response, auth_response
 

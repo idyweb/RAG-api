@@ -159,6 +159,7 @@ class VectorStore:
                         "department": metadata.get("department"),
                         "chunk_index": metadata.get("chunk_index"),
                         "doc_type": metadata.get("doc_type"),
+                        "parent_id": metadata.get("parent_id"),
                     }
                 })
         

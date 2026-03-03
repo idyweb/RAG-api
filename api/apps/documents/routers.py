@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from celery.result import AsyncResult
 
-from api.apps.auth.services import verify_user
+from api.core.dependencies import verify_user
 from api.apps.documents.schemas import (
     DocumentCreate,
     DocumentResponse,

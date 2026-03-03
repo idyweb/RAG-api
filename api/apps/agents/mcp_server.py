@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from api.config.settings import settings
 from api.apps.agents.models import AgentTool
-from api.apps.documents.models import Document
+from api.apps.documents.services import search_active_documents_for_agent
 
 # ── Engine (read-only queries, shares the same DB as FastAPI) ─────────────────
 _engine = create_async_engine(settings.DATABASE_URL, pool_size=5, max_overflow=2)
@@ -85,43 +85,13 @@ async def search_documents(
     Returns:
         List of document metadata dicts.
     """
-    limit = min(limit, 100)
-
     async with _async_session() as session:
-        query = (
-            select(Document)
-            .where(Document.is_active == True)
-            .where(Document.is_deleted == False)
-            .limit(limit)
+        return await search_active_documents_for_agent(
+            session=session,
+            department=department,
+            keyword=keyword,
+            limit=limit,
         )
-
-        result = await session.execute(query)
-        docs = result.scalars().all()
-
-        # Filter by department access
-        filtered = []
-        for doc in docs:
-            if doc.allowed_departments and department in doc.allowed_departments:
-                filtered.append(doc)
-            elif doc.department == department:
-                filtered.append(doc)
-
-        # Optional keyword filter on title
-        if keyword:
-            kw_lower = keyword.lower()
-            filtered = [d for d in filtered if kw_lower in d.title.lower()]
-
-        return [
-            {
-                "id": str(doc.id),
-                "title": doc.title,
-                "department": doc.department,
-                "doc_type": doc.doc_type,
-                "version": doc.version,
-                "allowed_departments": doc.allowed_departments,
-            }
-            for doc in filtered
-        ]
 
 
 @mcp.resource("agent-tools://list")

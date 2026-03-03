@@ -71,7 +71,7 @@ async def rag_query(
     if decision.routed_to != RoutedAgent.RAG:
         latency_ms = (time.time() - start_time) * 1000
         msg = (
-            f"This query requires the '{decision.routed_to.value}' agent "
+            f"This query requires the '{decision.routed_to}' agent "
             f"(Confidence: {decision.confidence_score:.2f}). "
             f"This specialized Copilot integration is coming soon."
         )
@@ -89,7 +89,7 @@ async def rag_query(
             session, request.query, user_id, user_department,
             0, latency_ms, False, "high",
             stage_timings=timer.as_dict(),
-            routed_to=decision.routed_to.value
+            routed_to=decision.routed_to
         )
         return response
 
@@ -190,7 +190,7 @@ async def rag_query(
         session, request.query, user_id, user_department,
         len(docs), latency_ms, False, "high",
         stage_timings=timer.as_dict(),
-        routed_to=RoutedAgent.RAG.value
+        routed_to=RoutedAgent.RAG
     )
     query_count.labels(department=user_department, confidence="high").inc()
     query_latency.labels(department=user_department, cached="false").observe(latency_ms / 1000.0)
@@ -240,7 +240,7 @@ async def rag_query_stream(
     if decision.routed_to != RoutedAgent.RAG:
         latency_ms = (time.time() - start_time) * 1000
         msg = (
-            f"This query requires the '{decision.routed_to.value}' agent "
+            f"This query requires the '{decision.routed_to}' agent "
             f"(Confidence: {decision.confidence_score:.2f}). "
             f"This specialized Copilot integration is coming soon."
         )
@@ -254,7 +254,7 @@ async def rag_query_stream(
             session, request.query, user_id, user_department,
             0, latency_ms, False, "high",
             stage_timings=timer.as_dict(),
-            routed_to=decision.routed_to.value
+            routed_to=decision.routed_to
         )
         yield "event: end\ndata: {}\n\n"
         return
@@ -319,7 +319,7 @@ async def rag_query_stream(
             session, request.query, user_id, user_department,
             len(docs), latency_ms, False, "high",
             stage_timings=timer.as_dict(),
-            routed_to=RoutedAgent.RAG.value
+            routed_to=RoutedAgent.RAG
         )
         query_count.labels(department=user_department, confidence="high").inc()
         query_latency.labels(department=user_department, cached="false").observe(latency_ms / 1000.0)
