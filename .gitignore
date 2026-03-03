@@ -10,4 +10,3 @@ wheels/
 .venv
 .env
 rag.zip
-test_*.py
