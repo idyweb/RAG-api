@@ -111,7 +111,7 @@ async def rag_query(
         docs = await vector_store.search(
             query=request.query,
             filter={
-                "department": user_department,
+                "allowed_departments": {"$in": [user_department]},
                 "is_active": True
             },
             limit=request.max_results,
@@ -263,7 +263,7 @@ async def rag_query_stream(
     with timer.stage("retrieval"):
         docs = await vector_store.search(
             query=request.query,
-            filter={"department": user_department, "is_active": True},
+            filter={"allowed_departments": {"$in": [user_department]}, "is_active": True},
             limit=request.max_results,
             score_threshold=request.confidence_threshold
         )

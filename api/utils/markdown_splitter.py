@@ -65,6 +65,9 @@ class MarkdownHeaderSplitter:
                 ("#", "H1"),
                 ("##", "H2"),
                 ("###", "H3"),
+                ("####", "H4"),
+                ("#####", "H5"),
+                ("######", "H6"),
             ]
 
         self.strip_headers = strip_headers

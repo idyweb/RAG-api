@@ -88,6 +88,7 @@ async def ingest_document(
         version=version,
         is_active=True,
         content_format=data.content_format,
+        allowed_departments=[data.department],
     )
 
     # Flush to get the generated document.id
@@ -217,6 +218,7 @@ async def _ingest_hierarchical(
                     "content": child_text,
                     "document_id": doc_id_str,
                     "department": data.department,
+                    "allowed_departments": document.allowed_departments or [data.department],
                     "chunk_index": child_idx,
                     "parent_id": parent_id_str,
                     "title": data.title,
@@ -277,6 +279,7 @@ async def _ingest_flat(
                 "content": chunk_text,
                 "document_id": doc_id_str,
                 "department": data.department,
+                "allowed_departments": document.allowed_departments or [data.department],
                 "chunk_index": idx,
                 "title": data.title,
                 "doc_type": data.doc_type,
@@ -341,7 +344,10 @@ def _chunk_hierarchical(
     try:
         header_chunks = split_markdown_by_headers(
             content,
-            headers=[("#", "H1"), ("##", "H2"), ("###", "H3")],
+            headers=[
+                ("#", "H1"), ("##", "H2"), ("###", "H3"),
+                ("####", "H4"), ("#####", "H5"), ("######", "H6"),
+            ],
             strip_headers=False,
         )
     except Exception:
@@ -557,29 +563,28 @@ async def _deactivate_old_versions(
         department: Department name
         current_doc_id: ID of newly created document (don't deactivate this one)
     """
+    from sqlalchemy import select
     from sqlalchemy.orm import selectinload
 
-    old_docs = await Document.find_many(
-        db=session,
-        filters={
-            "title": title,
-            "department": department,
-            "is_active": True,
-        },
-        limit=100,
-        options=[selectinload(Document.chunks)],
-    )
+    query = select(Document).where(
+        Document.title == title,
+        Document.department == department,
+        Document.is_active == True,
+        Document.id != current_doc_id
+    ).options(selectinload(Document.chunks)).limit(100)
+
+    result = await session.execute(query)
+    old_docs = result.scalars().all()
 
     vector_ids_to_deactivate = []
 
     for doc in old_docs:
-        if str(doc.id) != current_doc_id:
-            doc.is_active = False
-            await doc.save(db=session, commit=False)
+        doc.is_active = False
+        await doc.save(db=session, commit=False)
 
-            for chunk in doc.chunks:
-                if chunk.vector_id:  # Only children have vector_ids
-                    vector_ids_to_deactivate.append(chunk.vector_id)
+        for chunk in doc.chunks:
+            if chunk.vector_id:  # Only children have vector_ids
+                vector_ids_to_deactivate.append(chunk.vector_id)
 
     if vector_ids_to_deactivate:
         await vector_store.update_metadata_by_ids(
