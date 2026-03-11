@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     MAX_QUERY_LENGTH: int = 1000
     MAX_DOCUMENT_SIZE: int = 10_000_000  # 10MB
+    LLM_MAX_TOKENS: int = 4096
 
     # ── Database ─────────────────────────────────────────────────────────
     DATABASE_URL: str = Field(
