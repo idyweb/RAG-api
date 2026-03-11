@@ -1,0 +1,36 @@
+# Version control
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+.venv
+.env
+.env.*
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Docker
+Dockerfile
+docker-compose*.yml
+compose*.yml
+
+# Project metadata / docs
+.memory
+.agents
+*.md
+LICENSE
+
+# Tests (not needed in production image)
+tests/
+scripts/
+
+# OS
+.DS_Store
+Thumbs.db

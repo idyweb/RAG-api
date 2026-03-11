@@ -35,7 +35,7 @@ from fastmcp.utilities.lifespan import combine_lifespans
 logger = get_logger(__name__)
 
 
-# ── Lifespan ──────────────────────────────────────────────────────────────────
+# Lifespan 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -45,11 +45,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("Shutdown complete")
 
 
-# ── MCP ────────────────────────────────────────────────────────────────────
+# MCP 
 mcp_app = mcp.http_app(path="/")
 
-
-# ── App ───────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -61,8 +59,7 @@ app = FastAPI(
 )
 
 
-# ── Middleware ────────────────────────────────────────────────────────────────
-
+# Middleware 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.BACKEND_CORS_ORIGINS,
@@ -72,25 +69,24 @@ app.add_middleware(
 )
 
 
-# ── Exception Handlers ────────────────────────────────────────────────────────
-
+# Exception Handlers
 app.add_exception_handler(BaseAPIException, base_api_exception_handler)          # type: ignore[arg-type]
 app.add_exception_handler(RequestValidationError, request_validation_exception_handler)  # type: ignore[arg-type]
 app.add_exception_handler(HTTPException, http_exception_handler)                  # type: ignore[arg-type]
 app.add_exception_handler(Exception, general_exception_handler)
 
 
-# ── Routers ───────────────────────────────────────────────────────────────────
+# Routers
 
 app.include_router(auth_router)
 app.include_router(documents_router)
 app.include_router(rag_router)
 
-# ── MCP Mount ─────────────────────────────────────────────────────────────────
+# ── MCP Mount
 app.mount("/mcp", mcp_app)
 
 
-# ── Health ────────────────────────────────────────────────────────────────────
+# ── Health 
 
 @app.get("/health", tags=["Infra"])
 async def health():

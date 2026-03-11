@@ -4,6 +4,7 @@ RAG query schemas.
 Input/output contracts for RAG queries.
 """
 
+import uuid
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
 from enum import Enum
@@ -13,8 +14,8 @@ class QueryRequest(BaseModel):
     """Request schema for RAG query."""
     
     session_id: Optional[str] = Field(
-        default=None,
-        description="Optional session ID for conversational memory."
+        default_factory=lambda: str(uuid.uuid4()),
+        description="Optional session ID for conversational memory. Defaults to a new UUID."
     )
     query: str = Field(
         ...,
