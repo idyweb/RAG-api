@@ -88,24 +88,57 @@ class VectorStore:
         metadata: Dict
     ) -> None:
         """
-        Insert or update document embedding.
-        
+        Insert or update a single document embedding.
+
         Args:
             id: Unique document chunk ID
             vector: Embedding vector
             metadata: MUST include 'department', 'is_active', 'title', etc.
-            
+
         CRITICAL: metadata['department'] is used for filtering
         """
         index = self._get_index()
-        
+
         # Pinecone upsert format: [(id, vector, metadata)]
         await asyncio.to_thread(
             index.upsert,
             vectors=[(id, vector, metadata)]
         )
-        
+
         logger.debug(f"Upserted vector: {id}, dept: {metadata.get('department')}")
+
+    async def upsert_batch(
+        self,
+        vectors: List[tuple],
+        batch_size: int = 100
+    ) -> int:
+        """
+        Batch upsert vectors to Pinecone.
+
+        Pinecone recommends batches of 100 vectors max per call.
+
+        Args:
+            vectors: List of (id, vector, metadata) tuples
+            batch_size: Max vectors per API call (Pinecone limit: 100)
+
+        Returns:
+            Total number of vectors upserted
+
+        Complexity: O(n/batch_size) API calls instead of O(n)
+        """
+        if not vectors:
+            return 0
+
+        index = self._get_index()
+        total = 0
+
+        for i in range(0, len(vectors), batch_size):
+            batch = vectors[i : i + batch_size]
+            await asyncio.to_thread(index.upsert, vectors=batch)
+            total += len(batch)
+
+        logger.info(f"Batch upserted {total} vectors in {(total + batch_size - 1) // batch_size} batches")
+        return total
     
     async def search(
         self,
@@ -160,6 +193,7 @@ class VectorStore:
                         "chunk_index": metadata.get("chunk_index"),
                         "doc_type": metadata.get("doc_type"),
                         "parent_id": metadata.get("parent_id"),
+                        "allowed_departments": metadata.get("allowed_departments", []),
                     }
                 })
         
@@ -182,21 +216,32 @@ class VectorStore:
     async def update_metadata_by_ids(
         self,
         ids: List[str],
-        updates: Dict
+        updates: Dict,
+        batch_size: int = 50
     ) -> None:
         """
         Update metadata for specific document chunks by ID.
+
+        Uses asyncio.gather to run updates concurrently within each batch,
+        avoiding O(n) sequential API calls.
+
+        Args:
+            ids: Vector IDs to update
+            updates: Metadata key-value pairs to set
+            batch_size: Concurrent updates per batch (limits connection pressure)
         """
+        if not ids:
+            return
+
         index = self._get_index()
-        
         updated_count = 0
-        # Pinecone recommend batching updates depending on tier, but typical sync is fine for few
-        for doc_id in ids:
-            await asyncio.to_thread(
-                index.update,
-                id=doc_id,
-                set_metadata=updates
-            )
-            updated_count += 1
-            
-        logger.info(f"Updated metadata for {updated_count} specific vectors.")
+
+        for i in range(0, len(ids), batch_size):
+            batch = ids[i : i + batch_size]
+            await asyncio.gather(*(
+                asyncio.to_thread(index.update, id=doc_id, set_metadata=updates)
+                for doc_id in batch
+            ))
+            updated_count += len(batch)
+
+        logger.info(f"Updated metadata for {updated_count} vectors in {(updated_count + batch_size - 1) // batch_size} batches")

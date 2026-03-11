@@ -9,6 +9,7 @@ Supports:
 from typing import List, Literal
 from abc import ABC, abstractmethod
 import asyncio
+import threading
 
 from api.config.settings import settings
 from api.utils.logger import get_logger
@@ -144,9 +145,7 @@ class AzureOpenAIEmbeddingService(EmbeddingService):
         return self._dimension
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 # Factory function to get the right provider
-# ─────────────────────────────────────────────────────────────────────────────
 
 def get_embedding_service() -> EmbeddingService:
     """
@@ -174,17 +173,16 @@ def get_embedding_service() -> EmbeddingService:
         raise ValueError(f"Unknown embedding provider: {provider}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Convenience functions (backward compatible with your existing code)
-# ─────────────────────────────────────────────────────────────────────────────
-
 _embedding_service: EmbeddingService | None = None
+_embedding_lock = threading.Lock()
 
 def _get_service() -> EmbeddingService:
-    """Get singleton embedding service."""
+    """Get singleton embedding service (thread-safe)."""
     global _embedding_service
     if _embedding_service is None:
-        _embedding_service = get_embedding_service()
+        with _embedding_lock:
+            if _embedding_service is None:
+                _embedding_service = get_embedding_service()
     return _embedding_service
 
 

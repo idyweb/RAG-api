@@ -157,45 +157,42 @@ class CacheManager:
             
     async def get_chat_history(self, session_id: str, limit: int = 10) -> List[Dict[str, str]]:
         """
-        Get previous chat messages for a given session.
-        Returns up to `limit` most recent messages (default 10).
+        Get the most recent chat messages for a session.
+
+        Fetches only the last `limit` messages directly from Redis
+        using negative indexing — no full list load into Python.
         """
         try:
             key = f"chat:history:{session_id}"
-            # LTRIM keeps the list size bounded, but we also just fetch the latest N.
-            # LRANGE returns elements in order they were pushed (0 to -1 is all).
-            raw_messages = await self.redis.lrange(key, 0, -1)
-            
-            messages = []
-            for msg in raw_messages:
-                messages.append(json.loads(msg))
-                
-            return messages[-limit:]
-            
+            raw_messages = await self.redis.lrange(key, -limit, -1)
+
+            return [json.loads(msg) for msg in raw_messages]
+
         except Exception as e:
             logger.error(f"Failed to fetch chat history: {e}")
             return []
-            
+
+    _MAX_CHAT_MESSAGES = 50
+
     async def append_chat_message(self, session_id: str, role: str, content: str, ttl: int = 86400) -> None:
         """
-        Append a new message to the chat history for a session.
-        TTL resets on every push (default 24 hours).
+        Append a message and cap the list at _MAX_CHAT_MESSAGES.
+
+        Uses RPUSH + LTRIM + EXPIRE in a single pipeline (atomic).
+        LTRIM prevents unbounded memory growth per session.
         """
         try:
             key = f"chat:history:{session_id}"
-            msg_data = {
-                "role": role,
-                "content": content
-            }
-            
-            # Use pipeline to execute LPUSH and EXPIRE atomically
+            msg_data = json.dumps({"role": role, "content": content})
+
             pipe = self.redis.pipeline()
-            pipe.rpush(key, json.dumps(msg_data))
+            pipe.rpush(key, msg_data)
+            pipe.ltrim(key, -self._MAX_CHAT_MESSAGES, -1)
             pipe.expire(key, ttl)
             await pipe.execute()
-            
+
             logger.debug(f"Appended {role} message to session {session_id}")
-            
+
         except Exception as e:
             logger.error(f"Failed to append chat message: {e}")
     
