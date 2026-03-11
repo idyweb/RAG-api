@@ -77,77 +77,63 @@ def get_semantic_router() -> SemanticRouter:
         DefaultAgent(
             name="rag",
             description=(
-                "(HR Policy Assistant, General Knowledge)\n"
-                "   - Handles queries about corporate policies, HR, leave "
-                "(e.g., maternity leave), IT guidelines, FAQs, facilities, "
-                "general admin, complaints, and static manuals.\n"
-                "   - If the user asks \"What is...\", \"How do I...\", "
-                "\"What is the policy for...\", or expresses a general "
-                "workplace concern or complaint (e.g., food, cafeteria, "
-                "office), route here."
+                "DEFAULT agent for all knowledge/policy/how-to questions. "
+                "Searches company documents (HR policies, handbooks, guidelines, product catalogs, SOPs, FAQs). "
+                "Use for: 'What is the policy for...', 'How do I...', 'What does [document] say about...', "
+                "workplace concerns, process explanations, static product info, any question answerable from documents."
             ),
         ),
         DefaultAgent(
             name="power_bi",
             description=(
-                "(Sales Intelligence - Analytics)\n"
-                "   - Handles queries about dashboards, historical charts, "
-                "revenue targets, aggregate sales figures.\n"
-                "   - Example: \"Show me the top selling SKUs in Angola "
-                "this month compared to target.\""
+                "Analytics dashboards and aggregate business metrics. "
+                "Use ONLY for: revenue vs target, sales trends over time, KPI dashboards, "
+                "top/bottom performing SKUs/regions, charts, comparisons across periods. "
+                "Signals: 'show me', 'compare', 'trend', 'target vs actual', 'top selling', 'dashboard'."
             ),
         ),
         DefaultAgent(
             name="gtm_api",
             description=(
-                "(Sales Intelligence - CRM/Operations)\n"
-                "   - Handles route planning, sales rep performance, "
-                "active pipeline status.\n"
-                "   - Example: \"What is John's route today?\" or "
-                "\"Show me the pipeline for Q3.\""
+                "Live CRM and field sales operations. "
+                "Use ONLY for: sales rep daily routes, active pipeline deals, field visit logs, "
+                "rep performance tracking. "
+                "Signals: specific rep names + 'route/schedule/visits', 'pipeline status', 'field performance'."
             ),
         ),
         DefaultAgent(
             name="erp_api",
             description=(
-                "(ERP Support Copilot)\n"
-                "   - Handles live transactional data: Microsoft Dynamics "
-                "Business Central, inventory limits, PO status, financial "
-                "closes, stock levels.\n"
-                "   - Example: \"Has Purchase Order 12345 been approved?\" "
-                "or \"How much Cowbell 400g is in the Lagos warehouse?\""
+                "Live ERP transactional data (Business Central, SAP, etc). "
+                "Use ONLY for: specific PO/invoice/order status, current stock levels, "
+                "live account balances, remaining leave balance, payment status. "
+                "Signals: specific reference numbers (PO #, invoice #), 'approved yet', 'current stock', "
+                "'how much do I have left', 'status of my order'. "
+                "NOT for: policy questions, process explanations, or 'how does X work' — those go to rag."
             ),
         ),
         DefaultAgent(
             name="qms",
             description=(
-                "(Production Quality Assistant)\n"
-                "   - Handles IS-OEE (Overall Equipment Effectiveness) "
-                "systems, Quality Management System (QMS), equipment "
-                "maintenance logs, raw materials batch info, incidence "
-                "reports.\n"
-                "   - Example: \"Show the maintenance history for "
-                "packaging line 3\" or \"Are there any QMS incidents "
-                "for batch A1?\""
+                "Quality Management System and production equipment data. "
+                "Use ONLY for: OEE metrics, equipment maintenance logs/history, "
+                "QMS incidents, batch quality records, raw material traceability. "
+                "Signals: batch numbers, equipment/line names, 'maintenance history', 'quality incident', 'OEE'."
             ),
         ),
         DefaultAgent(
             name="document_search",
             description=(
-                "(Intelligent Document Search)\n"
-                "   - The user is explicitly asking to *find* a specific "
-                "file, presentation, or email, rather than asking for "
-                "the answer inside it.\n"
-                "   - Example: \"Find the Q3 marketing presentation that "
-                "John sent last week.\""
+                "File/document discovery — finding WHERE a document is, not what's IN it. "
+                "Use ONLY when the user wants to locate/find/retrieve a specific file, presentation, or email. "
+                "Signals: 'find the document', 'where is the file', 'locate the presentation that [person] sent'."
             ),
         ),
         DefaultAgent(
             name="unknown",
             description=(
-                "(Fallback)\n"
-                "   - The request is completely nonsensical, malicious, or "
-                "clearly falls outside any corporate AI capabilities."
+                "Fallback for nonsensical, malicious, or completely out-of-scope requests "
+                "that no other agent can handle."
             ),
         ),
     ]
