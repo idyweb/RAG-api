@@ -27,6 +27,7 @@ class IngestionTask(Task):
     _loop = None
     _session_factory = None
     _vector_store = None
+    _cache = None
 
     @property
     def loop(self):
@@ -49,6 +50,13 @@ class IngestionTask(Task):
             self._vector_store = get_vector_store()
         return self._vector_store
 
+    @property
+    def cache(self):
+        if self._cache is None:
+            from api.core.dependencies import get_cache
+            self._cache = get_cache()
+        return self._cache
+
 
 @celery_app.task(
     base=IngestionTask,
@@ -66,6 +74,7 @@ def ingest_document_task(
     content: str,
     user_department: str,
     source_url: str | None = None,
+    allowed_departments: list[str] | None = None,
 ) -> dict:
     """
     Background task: ingest a document with chunking + embedding + Pinecone upsert.
@@ -94,6 +103,7 @@ def ingest_document_task(
                 content=content,
                 user_department=user_department,
                 source_url=source_url,
+                allowed_departments=allowed_departments,
             )
         )
 
@@ -121,6 +131,7 @@ async def _async_ingest(
     content: str,
     user_department: str,
     source_url: str | None,
+    allowed_departments: list[str] | None,
 ) -> dict:
     """
     Async wrapper that creates a fresh session per task execution.
@@ -136,6 +147,7 @@ async def _async_ingest(
         doc_type=doc_type,
         source_url=source_url,
         content=content,
+        allowed_departments=allowed_departments,
     )
 
     async with task.session_factory() as session:
@@ -144,6 +156,7 @@ async def _async_ingest(
             vector_store=task.vector_store,
             data=data,
             user_department=user_department,
+            cache=task.cache,
         )
 
     return result.model_dump(mode="json")

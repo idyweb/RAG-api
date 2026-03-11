@@ -20,13 +20,14 @@ from api.apps.documents.models import Document, DocumentChunk
 from api.apps.documents.schemas import DocumentCreate, DocumentResponse
 from api.core.embeddings import generate_embeddings, generate_embeddings_batch
 from api.core.vector_store import VectorStore
+from api.core.cache import CacheManager
 from api.utils.logger import get_logger
 from api.utils.exceptions import InvalidDepartmentError, PermissionDeniedException
 from api.utils.markdown_splitter import split_markdown_by_headers
 
 logger = get_logger(__name__)
 
-# Valid coragem departments (from JD)
+# Valid coragem departments
 VALID_DEPARTMENTS = ["Sales", "HR", "Finance", "Operations", "Manufacturing", "IT"]
 
 
@@ -34,7 +35,8 @@ async def ingest_document(
     session: AsyncSession,
     vector_store: VectorStore,
     data: DocumentCreate,
-    user_department: str
+    user_department: str,
+    cache: CacheManager | None = None,
 ) -> DocumentResponse:
     """
     Ingest a new document with hierarchical chunking, embedding, and versioning.
@@ -48,12 +50,14 @@ async def ingest_document(
     6. Embed child chunks and store in vector DB + DB
     7. Deactivate old versions if needed
     8. Commit transaction
+    9. Invalidate department cache so users see fresh results
 
     Args:
         session: Async DB session
         vector_store: Vector DB client
         data: Document creation request
         user_department: Department of user performing upload
+        cache: Optional cache manager for invalidation after ingest
 
     Returns:
         DocumentResponse with created document metadata
@@ -88,7 +92,7 @@ async def ingest_document(
         version=version,
         is_active=True,
         content_format=data.content_format,
-        allowed_departments=[data.department],
+        allowed_departments=data.allowed_departments or [data.department],
     )
 
     # Flush to get the generated document.id
@@ -134,6 +138,13 @@ async def ingest_document(
     await session.commit()
     await session.refresh(document)
 
+    # 6. Invalidate cached RAG answers for affected departments
+    if cache:
+        depts_to_invalidate = set(data.allowed_departments or [data.department])
+        depts_to_invalidate.add(data.department)
+        for dept in depts_to_invalidate:
+            await cache.invalidate_department(dept)
+
     logger.info(
         f"Successfully ingested document: {doc_id_str}, version: {version}, "
         f"parents: {parent_count}, children: {child_count}"
@@ -170,6 +181,9 @@ async def _ingest_hierarchical(
     Parents are stored in DB only (no embedding). Children are embedded
     and stored in both Pinecone and DB with a foreign key to their parent.
 
+    Uses batch embedding and batch Pinecone upsert to minimize API calls.
+    Complexity: O(n/batch_size) API calls instead of O(n).
+
     Returns:
         (parent_count, child_count) tuple
     """
@@ -180,30 +194,29 @@ async def _ingest_hierarchical(
         f"{len(children)} children for document: {doc_id_str}"
     )
 
+    # Collect all vectors for a single batch upsert at the end
+    pending_vectors: List[tuple] = []
     total_children = 0
+    allowed_depts = document.allowed_departments or [data.department]
 
     for parent_idx, parent_text in enumerate(parents):
-        # Store parent chunk in DB (no vector embedding)
         parent_chunk = await DocumentChunk.create(
             db=session,
             commit=False,
             document_id=document.id,
             content=parent_text,
             chunk_index=parent_idx,
-            vector_id=None,  # Parents are NOT embedded
+            vector_id=None,
             token_count=len(parent_text.split()),
             is_parent=True,
         )
-        await session.flush()  # Get parent_chunk.id
+        await session.flush()
         parent_id_str = str(parent_chunk.id)
 
-        # Gather children belonging to this parent
         child_texts = [text for text, pidx in children if pidx == parent_idx]
-
         if not child_texts:
             continue
 
-        # Batch embed children
         embeddings = await generate_embeddings_batch(child_texts)
 
         for child_idx, (child_text, embedding) in enumerate(
@@ -211,14 +224,14 @@ async def _ingest_hierarchical(
         ):
             vector_id = f"{doc_id_str}_child_{parent_idx}_{child_idx}"
 
-            await vector_store.upsert(
-                id=vector_id,
-                vector=embedding,
-                metadata={
+            pending_vectors.append((
+                vector_id,
+                embedding,
+                {
                     "content": child_text,
                     "document_id": doc_id_str,
                     "department": data.department,
-                    "allowed_departments": document.allowed_departments or [data.department],
+                    "allowed_departments": allowed_depts,
                     "chunk_index": child_idx,
                     "parent_id": parent_id_str,
                     "title": data.title,
@@ -226,7 +239,7 @@ async def _ingest_hierarchical(
                     "version": version,
                     "is_active": True,
                 },
-            )
+            ))
 
             await DocumentChunk.create(
                 db=session,
@@ -239,8 +252,11 @@ async def _ingest_hierarchical(
                 is_parent=False,
                 parent_chunk_id=parent_chunk.id,
             )
-
             total_children += 1
+
+    # Single batch upsert — O(n/100) API calls instead of O(n)
+    if pending_vectors:
+        await vector_store.upsert_batch(pending_vectors)
 
     return len(parents), total_children
 
@@ -257,7 +273,8 @@ async def _ingest_flat(
     """
     Flat ingestion: fixed-size word-based chunks, all embedded.
 
-    Used for plain text content without Markdown structure.
+    Uses batch embedding and batch Pinecone upsert.
+    Complexity: O(n/100) Pinecone API calls instead of O(n).
 
     Returns:
         Total chunk count
@@ -265,28 +282,30 @@ async def _ingest_flat(
     chunks = _chunk_fixed_size(content, chunk_size=500, overlap=50)
     logger.info(f"Flat chunking: {len(chunks)} chunks for document: {doc_id_str}")
 
-    # Batch generate embeddings
     embeddings = await generate_embeddings_batch(chunks)
+    allowed_depts = document.allowed_departments or [data.department]
 
+    pending_vectors: List[tuple] = []
     chunk_records = []
+
     for idx, (chunk_text, embedding) in enumerate(zip(chunks, embeddings)):
         vector_id = f"{doc_id_str}_chunk_{idx}"
 
-        await vector_store.upsert(
-            id=vector_id,
-            vector=embedding,
-            metadata={
+        pending_vectors.append((
+            vector_id,
+            embedding,
+            {
                 "content": chunk_text,
                 "document_id": doc_id_str,
                 "department": data.department,
-                "allowed_departments": document.allowed_departments or [data.department],
+                "allowed_departments": allowed_depts,
                 "chunk_index": idx,
                 "title": data.title,
                 "doc_type": data.doc_type,
                 "version": version,
                 "is_active": True,
             },
-        )
+        ))
 
         chunk_records.append(
             {
@@ -298,6 +317,10 @@ async def _ingest_flat(
                 "is_parent": False,
             }
         )
+
+    # Batch upsert all vectors
+    if pending_vectors:
+        await vector_store.upsert_batch(pending_vectors)
 
     await DocumentChunk.create_many(
         db=session,
@@ -496,41 +519,44 @@ async def search_active_documents_for_agent(
     limit: int = 20,
 ) -> List[dict]:
     """
-    Search active documents for an agent.
-    Service layer function to prevent cross-module model queries.
+    Search active documents visible to a department.
+
+    Filters by department authorization in SQL (not Python) to avoid
+    loading all documents into memory.
 
     Args:
         session: DB session
         department: Target department
-        keyword: Optional title search keyword
+        keyword: Optional title search keyword (case-insensitive)
         limit: Max results
 
     Returns:
-        List of dictionaries containing document metadata needed by agents.
+        List of dicts with document metadata.
+
+    Complexity: O(log n) with proper indexes vs O(n) full-table scan before.
     """
-    from sqlalchemy import select
+    from sqlalchemy import select, or_, func
     limit = min(limit, 100)
 
     query = (
         select(Document)
         .where(Document.is_active == True)
         .where(Document.is_deleted == False)
-        .limit(limit)
+        .where(
+            or_(
+                Document.department == department,
+                Document.allowed_departments.contains([department]),
+                Document.allowed_departments.contains(["All"]),
+            )
+        )
     )
-    
-    result = await session.execute(query)
-    docs = result.scalars().all()
-
-    filtered = []
-    for doc in docs:
-        if doc.allowed_departments and department in doc.allowed_departments:
-            filtered.append(doc)
-        elif doc.department == department:
-            filtered.append(doc)
 
     if keyword:
-        kw_lower = keyword.lower()
-        filtered = [d for d in filtered if kw_lower in d.title.lower()]
+        query = query.where(func.lower(Document.title).contains(keyword.lower()))
+
+    query = query.limit(limit)
+    result = await session.execute(query)
+    docs = result.scalars().all()
 
     return [
         {
@@ -541,8 +567,95 @@ async def search_active_documents_for_agent(
             "version": doc.version,
             "allowed_departments": doc.allowed_departments,
         }
-        for doc in filtered
+        for doc in docs
     ]
+
+
+async def update_document_permissions(
+    session: AsyncSession,
+    vector_store: VectorStore,
+    cache: CacheManager | None,
+    document_id: str,
+    allowed_departments: List[str],
+    user_department: str,
+) -> dict:
+    """
+    Update which departments can access a document.
+
+    Updates three layers atomically:
+    1. Document record in PostgreSQL (allowed_departments column)
+    2. All child chunk vectors in Pinecone (allowed_departments metadata)
+    3. Redis cache invalidation for affected departments
+
+    Args:
+        session: DB session
+        vector_store: Vector DB client
+        cache: Cache manager for invalidation
+        document_id: UUID of the document to update
+        allowed_departments: New list of departments
+        user_department: Department of the requesting user (for permission check)
+
+    Returns:
+        Dict with document metadata and count of updated vectors
+
+    Raises:
+        PermissionDeniedException: If user's department doesn't own the document and isn't IT
+    """
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    result = await session.execute(
+        select(Document)
+        .where(Document.id == document_id, Document.is_deleted == False)
+        .options(selectinload(Document.chunks))
+    )
+    document = result.scalar_one_or_none()
+
+    if not document:
+        from api.utils.exceptions import BaseAPIException
+        raise BaseAPIException(status_code=404, detail="Document not found")
+
+    # Only the owning department or IT can change permissions
+    if user_department != "IT" and user_department != document.department:
+        raise PermissionDeniedException(
+            detail=f"Only the {document.department} department or IT can update permissions for this document"
+        )
+
+    old_departments = set(document.allowed_departments or [document.department])
+
+    # 1. Update PostgreSQL
+    document.allowed_departments = allowed_departments
+    await document.save(db=session, commit=False)
+
+    # 2. Update Pinecone metadata for all child chunk vectors
+    vector_ids = [chunk.vector_id for chunk in document.chunks if chunk.vector_id]
+    if vector_ids:
+        await vector_store.update_metadata_by_ids(
+            ids=vector_ids,
+            updates={"allowed_departments": allowed_departments},
+        )
+
+    await session.commit()
+
+    # 3. Invalidate cache for both old and new departments
+    if cache:
+        all_affected = old_departments | set(allowed_departments)
+        for dept in all_affected:
+            await cache.invalidate_department(dept)
+
+    logger.info(
+        f"Updated permissions for document {document_id}: "
+        f"{list(old_departments)} → {allowed_departments}, "
+        f"{len(vector_ids)} vectors updated"
+    )
+
+    return {
+        "id": str(document.id),
+        "title": document.title,
+        "department": document.department,
+        "allowed_departments": allowed_departments,
+        "vectors_updated": len(vector_ids),
+    }
 
 
 async def _deactivate_old_versions(
