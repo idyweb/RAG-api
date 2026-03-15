@@ -23,7 +23,6 @@ from api.apps.documents.tasks import ingest_document_task
 from api.apps.documents.services import update_document_permissions
 from api.core.celery_app import celery_app
 from api.utils.logger import get_logger
-from api.utils.pdf_parser import extract_text_from_pdf
 from fastapi.exceptions import HTTPException
 
 logger = get_logger(__name__)
@@ -69,9 +68,6 @@ async def ingest_pdf(
             status_code=413,
             detail=f"File too large. Maximum allowed size is {max_mb}MB.",
         )
-    # Reset the stream so extract_text_from_pdf can read it
-    import io
-    file.file = io.BytesIO(file_bytes)
 
     # Parse allowed_departments from comma-separated string
     dept_list: List[str] | None = None
@@ -80,18 +76,23 @@ async def ingest_pdf(
         if not dept_list:
             dept_list = None
 
-    # Extract text synchronously
-    extracted_text = extract_text_from_pdf(file.file)
+    # Save PDF to shared volume so the Celery worker can extract text.
+    # This avoids blocking the API for minutes during OCR.
+    import uuid as _uuid
+    from pathlib import Path
 
-    if not extracted_text:
-        raise HTTPException(status_code=400, detail="No readable text found in the PDF.")
+    upload_dir = Path("/app/tmp/uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    pdf_filename = f"{_uuid.uuid4().hex}.pdf"
+    pdf_path = upload_dir / pdf_filename
+    pdf_path.write_bytes(file_bytes)
 
-    # Dispatch to Celery worker
+    # Dispatch to Celery worker — PDF extraction happens in the worker
     task = ingest_document_task.delay(
         title=title,
         department=department,
         doc_type=doc_type,
-        content=extracted_text,
+        pdf_path=str(pdf_path),
         user_department=user["department"],
         source_url=source_url,
         allowed_departments=dept_list,

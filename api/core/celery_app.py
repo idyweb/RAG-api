@@ -34,3 +34,28 @@ celery_app.conf.update(
     task_default_retry_delay=10,
     task_max_retries=3,
 )
+
+
+# ── Eager initialization ─────────────────────────────────────────────────────
+# Pre-warm VectorStore, CacheManager, and Embeddings when the worker starts,
+# not on the first task. Eliminates ~30s cold-start penalty.
+
+from celery.signals import worker_process_init
+
+
+@worker_process_init.connect
+def warmup_worker(**kwargs):
+    """Pre-initialize external clients so the first task doesn't pay cold-start cost."""
+    from api.utils.logger import get_logger
+    _logger = get_logger(__name__)
+
+    try:
+        from api.core.dependencies import get_vector_store, get_cache
+        from api.core.embeddings import get_embedding_service
+
+        get_vector_store()
+        get_cache()
+        get_embedding_service()
+        _logger.info("[CELERY] Worker warm-up complete: VectorStore, Cache, Embeddings ready")
+    except Exception as e:
+        _logger.warning(f"[CELERY] Worker warm-up failed (will retry on first task): {e}")

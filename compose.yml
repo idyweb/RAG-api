@@ -15,6 +15,10 @@ services:
         condition: service_started
     volumes:
       - ./api:/app/api
+      - ./main.py:/app/main.py
+      - ./frontend:/app/frontend
+      - ./alembic:/app/alembic
+      - upload_tmp:/app/tmp/uploads
     restart: unless-stopped
 
   postgres:
@@ -59,8 +63,10 @@ services:
         condition: service_started
     volumes:
       - ./api:/app/api
+      - upload_tmp:/app/tmp/uploads
     restart: unless-stopped
 
 volumes:
   postgres_data:
   redis_data:
+  upload_tmp:

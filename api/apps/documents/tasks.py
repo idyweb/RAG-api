@@ -71,19 +71,22 @@ def ingest_document_task(
     title: str,
     department: str,
     doc_type: str,
-    content: str,
+    pdf_path: str,
     user_department: str,
     source_url: str | None = None,
     allowed_departments: list[str] | None = None,
 ) -> dict:
     """
-    Background task: ingest a document with chunking + embedding + Pinecone upsert.
+    Background task: extract text from PDF, then ingest with chunking + embedding.
+
+    PDF extraction (OCR) runs here in the worker, not in the API process,
+    so the upload endpoint returns 202 instantly.
 
     Args:
         title: Document title
         department: Target department
         doc_type: Document type (policy, guide, catalog, etc.)
-        content: Raw text content (already extracted from PDF)
+        pdf_path: Path to the uploaded PDF on the shared volume
         user_department: Uploading user's department (for permission check)
         source_url: Optional source URL
 
@@ -94,6 +97,23 @@ def ingest_document_task(
     start_time = time.time()
 
     try:
+        # Extract text from PDF in the worker process
+        from pathlib import Path
+        from api.utils.pdf_parser import extract_text_from_pdf
+
+        pdf_file_path = Path(pdf_path)
+        if not pdf_file_path.exists():
+            raise FileNotFoundError(f"PDF file not found at {pdf_path}")
+
+        with open(pdf_file_path, "rb") as f:
+            content = extract_text_from_pdf(f)
+
+        # Clean up the temp file after extraction
+        pdf_file_path.unlink(missing_ok=True)
+
+        if not content:
+            raise ValueError("No readable text found in the PDF.")
+
         result = self.loop.run_until_complete(
             _async_ingest(
                 self,

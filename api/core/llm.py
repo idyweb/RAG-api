@@ -19,21 +19,15 @@ def _build_context(docs: List[Dict]) -> str:
     """
     Build context string from retrieved documents.
 
-    Uses only the document title as the label — no numeric index.
-    This forces the LLM to cite by title (e.g. "According to the **Code of Conduct**")
-    instead of generic references like "Document 3".
+    Labels every chunk with just the document title. The LLM is instructed
+    to identify and cite specific sections/headings from within the content
+    itself, making citations accurate regardless of document format.
     """
     context_parts = []
-    seen_titles: dict[str, int] = {}
     for doc in docs:
         title = doc["metadata"]["title"]
         content = doc["content"]
-        # Deduplicate labels when same doc appears multiple times (different chunks)
-        seen_titles[title] = seen_titles.get(title, 0) + 1
-        if seen_titles[title] > 1:
-            label = f"[{title} — section {seen_titles[title]}]"
-        else:
-            label = f"[{title}]"
+        label = f"[{title}]"
         context_parts.append(f"{label}\n{content}")
     return "\n\n".join(context_parts)
 
@@ -84,7 +78,8 @@ async def generate_answer_stream(
     docs: List[Dict],
     department: str,
     language: str = "en",
-    chat_history: Optional[List[Dict[str, str]]] = None
+    chat_history: Optional[List[Dict[str, str]]] = None,
+    usage_out: Optional[Dict] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Stream answer tokens using retrieved documents as context.
@@ -153,6 +148,13 @@ Answer (based only on the context above):"""
                         if fr:
                             finish_reason = fr
 
+                        # Capture token usage from the final chunk
+                        if usage_out is not None and "usage" in data:
+                            usage = data["usage"]
+                            usage_out["prompt_tokens"] = usage.get("prompt_tokens", 0)
+                            usage_out["completion_tokens"] = usage.get("completion_tokens", 0)
+                            usage_out["total_tokens"] = usage.get("total_tokens", 0)
+
                         if content:
                             chunk_count += 1
                             yield content
@@ -202,10 +204,13 @@ You provide accurate, professional information based strictly on company documen
 - When uncertain, err on the side of directing to human support
 
 ### Citations (CRITICAL)
-- ALWAYS cite the document by its exact title in bold. The title appears in square brackets at the start of each context block (e.g. [Code of Conduct]).
-- NEVER use numbered references like "Document 1", "Document 3", "Doc 1", or "[1]". Always use the real title.
-- Format: "According to the **Code of Conduct**..." or "Based on the **Employee Handbook**..."
-- Multiple sources: "According to the **Travel Policy** and the **Expense Guidelines**..."
+- Each context block is labeled with a document title in square brackets (e.g. [Code of Conduct]). ALWAYS cite the document by this title in bold.
+- When the content within a context block contains section headers, headings, or numbered sections (e.g. "7.0 How to Deal with a Conflict of Interest", "Section 3: Eligibility"), cite BOTH the document title AND the specific section the information comes from.
+- Format: "According to the **Conflict of Interest Policy** (Section 7.0 — How to Deal with a Conflict of Interest)..."
+- This allows users to find the exact part of the original document. Be specific — cite the section as it appears in the content, not paraphrased.
+- NEVER use generic references like "Document 1", "section 3", or "[1]". Always use the real document title and real section name from the content.
+- NEVER invent section names or numbers that don't appear in the context.
+- Multiple sources: "According to the **Travel Policy** (Section 3.0 — Eligibility) and the **Expense Guidelines** (Section 2.0 — Limits)..."
 
 ### Completeness (CRITICAL)
 - Always finish your answer. Do not stop mid-sentence or mid-list.
@@ -231,7 +236,7 @@ If the query is:
 
 ## Example
 
-Good: "According to the **Product Catalog 2024**, Cowbell Chocolate 400g is priced at:
+Good: "According to the **Product Catalog 2024** (Section 4.0 — Pricing), Cowbell Chocolate 400g is priced at:
 - Retail: ₦2,500/tin
 - Distributor: ₦2,200/tin
 - Minimum order: 24 tins per carton
@@ -240,6 +245,7 @@ For current promotions, please check with your Regional Sales Manager."
 
 Bad: "I think the price is around 2500 naira but I'm not completely sure." (speculating, no citation)
 Bad: "According to **Document 3**..." (using a number instead of the real document title)
+Bad: "According to the **Product Catalog — section 3**..." (generic number instead of the actual section heading from the document)
 """
 
     # Add language-specific instructions
