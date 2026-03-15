@@ -33,6 +33,9 @@ class Document(BaseModel):
         String(20), default="text", nullable=False
     )
     # Values: "text", "markdown"
+    content_hash: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, index=True
+    )
     
     # Relationship to chunks
     chunks: Mapped[list["DocumentChunk"]] = relationship(

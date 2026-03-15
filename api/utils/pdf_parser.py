@@ -69,9 +69,13 @@ def extract_text_from_pdf(file_obj: IO[bytes]) -> str:
                 "utf-8", errors="surrogatepass"
             ).decode("utf-8", errors="ignore")
 
+            # Debug: also check plain pymupdf extraction for comparison
+            plain_chars = sum(len(page.get_text("text")) for page in doc)
             logger.info(
-                f"Extracted {len(markdown_cleaned)} chars as Markdown "
-                f"from PDF ({len(doc)} pages)"
+                f"Extracted {len(markdown_cleaned)} chars as Markdown, "
+                f"{plain_chars} chars as plain text "
+                f"from PDF ({len(doc)} pages). "
+                f"First 200 chars of markdown: {repr(markdown_cleaned[:200])}"
             )
 
             doc.close()
@@ -91,8 +95,7 @@ def extract_text_from_pdf(file_obj: IO[bytes]) -> str:
     except ValueError:
         raise
     except Exception as e:
-        logger.error(f"PDF extraction failed: {e}")
+        logger.error(f"PDF extraction failed: {type(e).__name__}: {e}", exc_info=True)
         raise ValueError(
-            "Could not extract text from the provided PDF file. "
-            "Ensure it is a valid format and not purely scanned images."
+            f"Could not extract text from the provided PDF file: {e}"
         )

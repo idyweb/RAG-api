@@ -13,6 +13,7 @@ Hierarchical Chunking Strategy:
 """
 
 from typing import List, Tuple
+import hashlib
 import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -78,10 +79,36 @@ async def ingest_document(
 
     logger.info(f"Ingesting document: {data.title} for dept: {data.department}")
 
-    # 1. Check for existing document (versioning logic)
+    # 1. Content hash dedup — skip if identical content already exists and is active
+    content_hash = hashlib.sha256(data.content.encode()).hexdigest()
+    existing = await _find_active_by_hash(session, content_hash, data.department)
+    if existing:
+        logger.info(
+            f"Duplicate content detected (hash={content_hash[:12]}...), "
+            f"skipping ingestion. Existing doc: {existing.id}"
+        )
+        chunk_count = await DocumentChunk.count(
+            db=session, filters={"document_id": str(existing.id)}
+        )
+        parent_count = await DocumentChunk.count(
+            db=session, filters={"document_id": str(existing.id), "is_parent": True}
+        )
+        return DocumentResponse(
+            id=str(existing.id),
+            title=existing.title,
+            department=existing.department,
+            version=existing.version,
+            chunk_count=chunk_count,
+            content_format=existing.content_format,
+            parent_chunk_count=parent_count,
+            child_chunk_count=chunk_count - parent_count,
+            created_at=existing.created_at,
+        )
+
+    # 2. Check for existing document (versioning logic)
     version = await _get_next_version(session, data.title, data.department)
 
-    # 2. Create document record
+    # 3. Create document record
     document = await Document.create(
         db=session,
         commit=False,
@@ -92,6 +119,7 @@ async def ingest_document(
         version=version,
         is_active=True,
         content_format=data.content_format,
+        content_hash=content_hash,
         allowed_departments=data.allowed_departments or [data.department],
     )
 
@@ -138,12 +166,14 @@ async def ingest_document(
     await session.commit()
     await session.refresh(document)
 
-    # 6. Invalidate cached RAG answers for affected departments
-    if cache:
+    # 6. Invalidate cache ONLY on re-versioning (same title, updated content).
+    # New documents with new titles don't invalidate — TTL handles staleness.
+    if cache and version > 1:
         depts_to_invalidate = set(data.allowed_departments or [data.department])
         depts_to_invalidate.add(data.department)
         for dept in depts_to_invalidate:
             await cache.invalidate_department(dept)
+        logger.info(f"Cache invalidated for re-versioned doc '{data.title}' v{version}")
 
     logger.info(
         f"Successfully ingested document: {doc_id_str}, version: {version}, "
@@ -213,9 +243,17 @@ async def _ingest_hierarchical(
         await session.flush()
         parent_id_str = str(parent_chunk.id)
 
-        child_texts = [text for text, pidx in children if pidx == parent_idx]
-        if not child_texts:
+        raw_child_texts = [text for text, pidx in children if pidx == parent_idx]
+        if not raw_child_texts:
             continue
+
+        # Prepend parent section header to each child so the LLM can cite
+        # the exact section regardless of which child chunk is retrieved.
+        section_header = _extract_first_header(parent_text)
+        if section_header:
+            child_texts = [f"[Section: {section_header}]\n{ct}" for ct in raw_child_texts]
+        else:
+            child_texts = raw_child_texts
 
         embeddings = await generate_embeddings_batch(child_texts)
 
@@ -329,6 +367,32 @@ async def _ingest_flat(
     )
 
     return len(chunk_records)
+
+
+def _extract_first_header(text: str) -> str | None:
+    """
+    Extract the first heading from a parent chunk.
+
+    Handles common formats: Markdown headers, numbered sections,
+    bold headers. Returns None if no heading found.
+    """
+    import re
+
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Markdown header: ## **Title** or ## Title
+        match = re.match(r"^#{1,6}\s+\*{0,2}(.+?)\*{0,2}\s*$", line)
+        if match:
+            return match.group(1).strip()
+        # Numbered section: "7.0 How to Deal..." or "3. Title"
+        match = re.match(r"^(\d+(?:\.\d+)?\.?\s+\S.{4,80})$", line)
+        if match:
+            return match.group(1).strip()
+        # Stop after first non-empty line if no header found
+        break
+    return None
 
 
 # ── Chunking Algorithms ──────────────────────────────────────────────────────
@@ -467,6 +531,29 @@ def _chunk_fixed_size(
 
 
 # ── Version Management ────────────────────────────────────────────────────────
+
+
+async def _find_active_by_hash(
+    session: AsyncSession,
+    content_hash: str,
+    department: str,
+) -> Document | None:
+    """
+    Check if an active document with identical content already exists.
+
+    Why hash-based: avoids re-ingesting the same PDF uploaded multiple times,
+    which wastes embedding API calls and Pinecone storage.
+    """
+    docs = await Document.find_many(
+        db=session,
+        limit=1,
+        filters={
+            "content_hash": content_hash,
+            "department": department,
+            "is_active": True,
+        },
+    )
+    return docs[0] if docs else None
 
 
 def calculate_next_version(latest_version: int | None) -> int:

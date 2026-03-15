@@ -72,13 +72,19 @@ class Settings(BaseSettings):
 
     # ── CORS ─────────────────────────────────────────────────────────────
     ALLOWED_HOSTS: List[str] = ["*"]
-    BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    BACKEND_CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000", "http://localhost:5500"]
     ALLOWED_ORIGINS: List[str] = ["*"]
 
     # ── Embedding ────────────────────────────────────────────────────────
     EMBEDDING_PROVIDER: str = Field("gemini", description="gemini | azure_openai")
     EMBEDDING_MODEL: str = "gemini-embedding-001"
     EMBEDDING_DIMENSION: int = 3072
+
+    # ── Langfuse (LLM Observability) ─────────────────────────────────────
+    LANGFUSE_ENABLED: bool = Field(default=False, description="Enable Langfuse tracing")
+    LANGFUSE_SECRET_KEY: str = Field(default="", description="Langfuse secret key")
+    LANGFUSE_PUBLIC_KEY: str = Field(default="", description="Langfuse public key")
+    LANGFUSE_BASE_URL: str = Field(default="https://cloud.langfuse.com", description="Langfuse host URL")
 
     # ── Azure OpenAI ─────────────────────────────────────────────────────
     AZURE_OPENAI_ENDPOINT: str = Field(default="", description="Azure OpenAI Endpoint")

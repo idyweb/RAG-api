@@ -13,7 +13,6 @@ from api.db.base_model import Base
 import api.apps.auth.models
 import api.apps.documents.models
 import api.apps.agents.models
-import api.apps.health.models
 import api.apps.rag.models
 
 # this is the Alembic Config object, which provides

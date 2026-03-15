@@ -7,8 +7,11 @@ Registers routers, middleware, and exception handlers.
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
+from pathlib import Path
+
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -30,6 +33,7 @@ from api.apps.rag.routers import router as rag_router
 from api.apps.agents.mcp_server import mcp
 from api.db.session import get_session
 from api.core.dependencies import get_cache
+from api.core.langfuse_client import shutdown as langfuse_shutdown
 from fastmcp.utilities.lifespan import combine_lifespans
 
 logger = get_logger(__name__)
@@ -42,6 +46,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup/shutdown lifecycle events."""
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION} [{settings.ENVIRONMENT}]")
     yield
+    langfuse_shutdown()
     logger.info("Shutdown complete")
 
 
@@ -84,6 +89,11 @@ app.include_router(rag_router)
 
 # ── MCP Mount
 app.mount("/mcp", mcp_app)
+
+# ── Frontend (static files for dev/testing UI)
+_frontend_dir = Path(__file__).parent / "frontend"
+if _frontend_dir.exists():
+    app.mount("/app", StaticFiles(directory=str(_frontend_dir), html=True), name="frontend")
 
 
 # ── Health 

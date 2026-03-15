@@ -17,6 +17,12 @@ RUN uv sync --frozen --no-install-project --no-dev
 FROM python:3.12-slim
 WORKDIR /app
 
+# Install Tesseract OCR for scanned/image-based PDF text extraction
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    && rm -rf /var/lib/apt/lists/*
+
 # Point Python to use the virtual environment
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
