@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Coragem AI Platform</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Auth Screen -->
+  <div id="auth-screen" class="screen active">
+    <div class="auth-container">
+      <h1>Coragem AI</h1>
+      <p class="subtitle">Enterprise Knowledge Platform</p>
+
+      <div class="tab-bar">
+        <button class="tab active" data-tab="login">Login</button>
+        <button class="tab" data-tab="register">Register</button>
+      </div>
+
+      <!-- Login Form -->
+      <form id="login-form" class="auth-form">
+        <input type="email" id="login-email" placeholder="Email" required>
+        <input type="password" id="login-password" placeholder="Password" required minlength="8">
+        <button type="submit" class="btn-primary">Login</button>
+        <p id="login-error" class="error"></p>
+      </form>
+
+      <!-- Register Form -->
+      <form id="register-form" class="auth-form hidden">
+        <input type="text" id="reg-name" placeholder="Full Name" required minlength="2">
+        <input type="email" id="reg-email" placeholder="Email" required>
+        <input type="password" id="reg-password" placeholder="Password (min 8 chars)" required minlength="8">
+        <select id="reg-department" required>
+          <option value="">Select Department</option>
+          <option>Sales</option>
+          <option>HR</option>
+          <option>Finance</option>
+          <option>Operations</option>
+          <option>Manufacturing</option>
+          <option>IT</option>
+        </select>
+        <select id="reg-role">
+          <option value="employee">Employee</option>
+          <option value="manager">Manager</option>
+          <option value="admin">Admin</option>
+        </select>
+        <button type="submit" class="btn-primary">Register</button>
+        <p id="register-error" class="error"></p>
+        <p id="register-success" class="success"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main App Screen -->
+  <div id="app-screen" class="screen">
+    <header>
+      <div class="header-left">
+        <h2>Coragem AI</h2>
+        <span id="user-badge" class="badge"></span>
+      </div>
+      <div class="header-right">
+        <button class="tab-nav active" data-view="chat">Chat</button>
+        <button class="tab-nav" data-view="upload">Upload</button>
+        <button id="logout-btn" class="btn-secondary">Logout</button>
+      </div>
+    </header>
+
+    <!-- Chat View -->
+    <div id="chat-view" class="view active">
+      <div id="messages" class="messages"></div>
+      <div class="chat-input-area">
+        <input type="text" id="query-input" placeholder="Ask a question about company documents..." autofocus>
+        <button id="send-btn" class="btn-primary">Send</button>
+      </div>
+      <div id="sources-panel" class="sources-panel hidden">
+        <h4>Sources</h4>
+        <div id="sources-list"></div>
+      </div>
+    </div>
+
+    <!-- Upload View -->
+    <div id="upload-view" class="view">
+      <div class="upload-container">
+        <h3>Upload Document</h3>
+        <form id="upload-form">
+          <input type="text" id="doc-title" placeholder="Document Title" required maxlength="500">
+          <select id="doc-department" required>
+            <option value="">Owning Department</option>
+            <option>Sales</option>
+            <option>HR</option>
+            <option>Finance</option>
+            <option>Operations</option>
+            <option>Manufacturing</option>
+            <option>IT</option>
+          </select>
+          <select id="doc-type" required>
+            <option value="">Document Type</option>
+            <option value="policy">Policy</option>
+            <option value="guide">Guide</option>
+            <option value="catalog">Catalog</option>
+            <option value="handbook">Handbook</option>
+            <option value="report">Report</option>
+            <option value="sop">SOP</option>
+          </select>
+          <input type="text" id="doc-allowed-depts" placeholder="Allowed departments (comma-separated, optional)">
+          <div class="file-input-wrapper">
+            <input type="file" id="doc-file" accept=".pdf" required>
+            <span id="file-name">No file selected</span>
+          </div>
+          <button type="submit" class="btn-primary">Upload PDF</button>
+        </form>
+        <div id="upload-status" class="hidden">
+          <div class="spinner"></div>
+          <p id="upload-message"></p>
+        </div>
+        <div id="upload-result" class="hidden"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
